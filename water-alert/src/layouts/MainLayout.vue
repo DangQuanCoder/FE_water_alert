@@ -2,19 +2,43 @@
   <q-layout view="lHh Lpr lFf">
     <q-header elevated>
       <q-toolbar>
-        <q-btn flat dense round icon="menu" aria-label="Menu" @click="toggleLeftDrawer" />
+        <q-btn flat dense round icon="menu" aria-label="Menu" @click="leftDrawerOpen = !leftDrawerOpen" />
+        <q-toolbar-title>
+          Quasar App
+        </q-toolbar-title>
 
-        <q-toolbar-title> Quasar App </q-toolbar-title>
+        <div class="row items-center q-gutter-sm">
+          <div v-if="auth.phone" class="text-subtitle2 q-mr-sm">
+            {{ auth.phone }} <span class="text-caption text-grey-6">({{ auth.role }})</span>
+          </div>
 
-        <div>Quasar v{{ $q.version }}</div>
+          <q-btn flat round dense icon="logout" label="Đăng xuất" @click="onLogout" />
+        </div>
       </q-toolbar>
     </q-header>
 
     <q-drawer v-model="leftDrawerOpen" show-if-above bordered>
-      <q-list>
-        <q-item-label header> Essential Links </q-item-label>
+      <q-list padding>
+        <q-item clickable v-ripple to="/">
+          <q-item-section avatar>
+            <q-icon name="home" />
+          </q-item-section>
+          <q-item-section>Trang chủ</q-item-section>
+        </q-item>
 
-        <EssentialLink v-for="link in linksList" :key="link.title" v-bind="link" />
+        <q-item clickable v-ripple to="/admin" v-if="auth.role === 'admin'">
+          <q-item-section avatar>
+            <q-icon name="admin_panel_settings" />
+          </q-item-section>
+          <q-item-section>Admin</q-item-section>
+        </q-item>
+
+        <q-item clickable v-ripple to="/user">
+          <q-item-section avatar>
+            <q-icon name="person" />
+          </q-item-section>
+          <q-item-section>User</q-item-section>
+        </q-item>
       </q-list>
     </q-drawer>
 
@@ -26,56 +50,24 @@
 
 <script setup>
 import { ref } from 'vue'
-import EssentialLink from 'components/EssentialLink.vue'
-
-const linksList = [
-  {
-    title: 'Docs',
-    caption: 'quasar.dev',
-    icon: 'school',
-    link: 'https://quasar.dev',
-  },
-  {
-    title: 'Github',
-    caption: 'github.com/quasarframework',
-    icon: 'code',
-    link: 'https://github.com/quasarframework',
-  },
-  {
-    title: 'Discord Chat Channel',
-    caption: 'chat.quasar.dev',
-    icon: 'chat',
-    link: 'https://chat.quasar.dev',
-  },
-  {
-    title: 'Forum',
-    caption: 'forum.quasar.dev',
-    icon: 'record_voice_over',
-    link: 'https://forum.quasar.dev',
-  },
-  {
-    title: 'Twitter',
-    caption: '@quasarframework',
-    icon: 'rss_feed',
-    link: 'https://twitter.quasar.dev',
-  },
-  {
-    title: 'Facebook',
-    caption: '@QuasarFramework',
-    icon: 'public',
-    link: 'https://facebook.quasar.dev',
-  },
-  {
-    title: 'Quasar Awesome',
-    caption: 'Community Quasar projects',
-    icon: 'favorite',
-    link: 'https://awesome.quasar.dev',
-  },
-]
+import { useRouter } from 'vue-router'
+import { useAuthStore } from 'stores/auth'
+import { Notify } from 'quasar'
 
 const leftDrawerOpen = ref(false)
+const router = useRouter()
+const auth = useAuthStore()
 
-function toggleLeftDrawer() {
-  leftDrawerOpen.value = !leftDrawerOpen.value
+function onLogout() {
+  // call store logout to clear tokens
+  auth.logout()
+  // optional: show notification
+  Notify.create({ type: 'positive', message: 'Đăng xuất thành công' })
+  // redirect to login
+  router.push({ path: '/login' })
 }
 </script>
+
+<style scoped>
+/* any custom styles */
+</style>
