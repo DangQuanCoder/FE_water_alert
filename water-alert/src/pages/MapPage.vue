@@ -26,20 +26,35 @@
 
           <q-separator class="q-my-sm" />
 
-          <div style="max-height:60vh; overflow:auto;">
+          <div style="max-height: 60vh; overflow: auto">
             <q-list bordered separator>
-              <q-item v-for="r in filteredSortedLevels" :key="r.id" clickable v-ripple @click="focusOnMarker(r)">
+              <q-item
+                v-for="r in filteredSortedLevels"
+                :key="r.id"
+                clickable
+                v-ripple
+                @click="focusOnMarker(r)"
+              >
                 <q-item-section avatar>
-                  <q-avatar size="36px" :style="{ backgroundColor: statusColorFor(r.level), color: 'white' }">
+                  <q-avatar
+                    size="36px"
+                    :style="{ backgroundColor: statusColorFor(r.level), color: 'white' }"
+                  >
                     {{ Math.round(Number(r.level)) }}
                   </q-avatar>
                 </q-item-section>
                 <q-item-section>
-                  <q-item-label>Level: {{ formatLevel(r.level) }} m</q-item-label>
+                  <q-item-label>Level: {{ formatLevel(r.level) }} cm</q-item-label>
                   <q-item-label caption>{{ formatTime(r.timestamp) }}</q-item-label>
                 </q-item-section>
                 <q-item-section side>
-                  <q-btn dense flat icon="open_in_new" @click.stop="openHistory(r)" title="Xem lịch sử" />
+                  <q-btn
+                    dense
+                    flat
+                    icon="open_in_new"
+                    @click.stop="openHistory(r)"
+                    title="Xem lịch sử"
+                  />
                 </q-item-section>
               </q-item>
               <q-item v-if="filteredSortedLevels.length === 0">
@@ -73,7 +88,7 @@
           <q-separator />
 
           <q-card-section class="q-pa-none">
-            <div id="map" style="height: 76vh; width: 100%;"></div>
+            <div id="map" style="height: 76vh; width: 100%"></div>
           </q-card-section>
         </q-card>
       </div>
@@ -92,8 +107,8 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 
 // config thresholds (same as UserPage)
-const THRESHOLD_WARNING = 1.0
-const THRESHOLD_DANGER = 2.0
+const THRESHOLD_WARNING = 40
+const THRESHOLD_DANGER = 80
 
 const map = ref(null)
 const markers = ref([]) // array of L.Circle or marker
@@ -107,7 +122,7 @@ const filterOptions = [
   { label: 'Tất cả', value: null },
   { label: 'Bình thường', value: 'normal' },
   { label: 'Cảnh báo', value: 'warning' },
-  { label: 'Nguy hiểm', value: 'danger' }
+  { label: 'Nguy hiểm', value: 'danger' },
 ]
 
 function statusFor(level) {
@@ -133,13 +148,17 @@ function createMap() {
   map.value = L.map('map', { preferCanvas: true }).setView(center, 11)
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
+    attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 }
 
 function clearMarkers() {
-  markers.value.forEach(m => {
-    try { map.value.removeLayer(m) } catch (err) { void err }
+  markers.value.forEach((m) => {
+    try {
+      map.value.removeLayer(m)
+    } catch (err) {
+      void err
+    }
   })
   markers.value = []
 }
@@ -156,7 +175,7 @@ function addMarkersFromLevels(data) {
   const baseLng = center.lng
 
   // sort descending by timestamp so newest first
-  const sorted = (data || []).slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
+  const sorted = (data || []).slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
 
   sorted.forEach((item, idx) => {
     // pseudo location: jitter around center
@@ -165,22 +184,29 @@ function addMarkersFromLevels(data) {
     const lng = baseLng + (Math.floor(idx / 5) - 2) * jitter + ((item.id % 5) - 2) * 0.002
 
     const color = statusColorFor(item.level)
-    const radius = 200 + Math.min(Math.max(Number(item.level || 0) * 80, 0), 200) // radius in meters
+    // computeRadius: base 40m -> tăng theo cm, clamp tối đa 160
+    function computeRadiusForCm(levelCm) {
+      const v = Number(levelCm || 0)
+      // radius (m) = base 40 + v * 1.5 (v là cm), clamp 160
+      return 40 + Math.min(Math.max(v * 1.5, 0), 120)
+    }
+    const radius = computeRadiusForCm(item.level) // radius in meters
 
     const circle = L.circle([lat, lng], {
       color,
       fillColor: color,
       fillOpacity: 0.6,
-      radius
+      radius,
     }).addTo(map.value)
 
     const popupContent = `
-      <div>
-        <div><strong>Mức:</strong> ${formatLevel(item.level)} m</div>
-        <div><strong>Thời gian:</strong> ${formatTime(item.timestamp)}</div>
-        <div style="margin-top:6px;"><a href="#" data-id="${item.id}" class="open-history-link">Xem lịch sử</a></div>
-      </div>
-    `
+  <div>
+    <div><strong>Mức:</strong> ${formatLevel(item.level)} cm</div>
+    <div><strong>Thời gian:</strong> ${formatTime(item.timestamp)}</div>
+    <div style="margin-top:6px;"><a href="#" data-id="${item.id}" class="open-history-link">Xem lịch sử</a></div>
+  </div>
+`
+
     circle.bindPopup(popupContent)
 
     // capture clicks on popup link
@@ -204,8 +230,8 @@ function addMarkersFromLevels(data) {
 function focusOnMarker(record) {
   if (!map.value || markers.value.length === 0) return
   // naive find by index of sorted list (same order as added)
-  const sorted = levels.value.slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
-  const idx = sorted.findIndex(r => r.id === record.id)
+  const sorted = levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  const idx = sorted.findIndex((r) => r.id === record.id)
   if (idx === -1) return
   const m = markers.value[idx]
   if (m) {
@@ -221,8 +247,10 @@ function openHistory(record) {
 
 function formatLevel(v) {
   if (v === null || v === undefined) return '--'
-  return Number(v).toFixed(2)
+  // hiển thị số nguyên (cm). Nếu muốn 1 chữ số thập phân, đổi toFixed(1)
+  return Number(v).toFixed(0)
 }
+
 function formatTime(ts) {
   if (!ts) return '--'
   return new Date(ts).toLocaleString()
@@ -231,9 +259,11 @@ function formatTime(ts) {
 const filteredSortedLevels = ref([])
 
 function applyFilterAndRender() {
-  const all = (levels.value || []).slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
+  const all = (levels.value || [])
+    .slice()
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
   const f = filterStatus.value
-  filteredSortedLevels.value = all.filter(r => {
+  filteredSortedLevels.value = all.filter((r) => {
     if (!f) return true
     const s = statusFor(r.level)
     if (f === 'normal') return s === 'normal'
@@ -248,7 +278,7 @@ async function loadLevels() {
   loading.value = true
   try {
     const res = await waterService.getAllLevels()
-    levels.value = Array.isArray(res) ? res : (res || [])
+    levels.value = Array.isArray(res) ? res : res || []
     applyFilterAndRender()
   } catch (err) {
     console.error('loadLevels error', err)
@@ -263,7 +293,10 @@ watch(autoRefresh, (v) => {
   if (v) {
     refreshTimer = setInterval(() => loadLevels(), 30_000)
   } else {
-    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+    if (refreshTimer) {
+      clearInterval(refreshTimer)
+      refreshTimer = null
+    }
   }
 })
 
@@ -281,10 +314,17 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
+  }
   clearMarkers()
   if (map.value) {
-    try { map.value.remove() } catch (err) { void err }
+    try {
+      map.value.remove()
+    } catch (err) {
+      void err
+    }
     map.value = null
   }
 })
@@ -292,5 +332,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* ensure leaflet images load from node_modules path if needed */
-.leaflet-container img { max-width: none !important; }
+.leaflet-container img {
+  max-width: none !important;
+}
 </style>

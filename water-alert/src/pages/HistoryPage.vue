@@ -13,25 +13,41 @@
 
           <div class="row q-mt-md items-center">
             <q-input dense v-model="filterFrom" type="date" label="Từ ngày (YYYY-MM-DD)" />
-            <q-input dense v-model="filterTo" type="date" label="Đến ngày (YYYY-MM-DD)" class="q-ml-sm" />
+            <q-input
+              dense
+              v-model="filterTo"
+              type="date"
+              label="Đến ngày (YYYY-MM-DD)"
+              class="q-ml-sm"
+            />
             <q-btn color="primary" class="q-ml-sm" label="Áp dụng" @click="applyDateFilter" />
             <q-btn flat class="q-ml-sm" label="Xóa filter" @click="clearDateFilter" />
           </div>
 
-          <div class="q-mt-md" style="min-height:300px">
-  <div v-if="loading" class="row items-center justify-center" style="min-height:300px">
-    <q-spinner-dots color="primary" size="40px" />
-  </div>
+          <div class="q-mt-md" style="min-height: 300px">
+            <div v-if="loading" class="row items-center justify-center" style="min-height: 300px">
+              <q-spinner-dots color="primary" size="40px" />
+            </div>
 
-  <!-- nếu không có data sau filter -->
-  <div v-else-if="noChartData" class="row items-center justify-center" style="min-height:300px">
-    <q-icon name="warning" color="warning" size="32px" class="q-mr-sm" />
-    <div class="text-subtitle1">Không có dữ liệu trong khoảng thời gian đã chọn</div>
-  </div>
+            <!-- nếu không có data sau filter -->
+            <div
+              v-else-if="noChartData"
+              class="row items-center justify-center"
+              style="min-height: 300px"
+            >
+              <q-icon name="warning" color="warning" size="32px" class="q-mr-sm" />
+              <div class="text-subtitle1">Không có dữ liệu trong khoảng thời gian đã chọn</div>
+            </div>
 
-  <!-- canvas chart -->
-  <canvas v-else ref="historyCanvas" width="900" height="320" style="max-width:100%; display:block;"></canvas>
-</div>
+            <!-- canvas chart -->
+            <canvas
+              v-else
+              ref="historyCanvas"
+              width="900"
+              height="320"
+              style="max-width: 100%; display: block"
+            ></canvas>
+          </div>
         </q-card>
 
         <q-card class="q-pa-md q-mt-md">
@@ -45,7 +61,7 @@
             :pagination="pagination"
           >
             <template v-slot:body-cell-level="props">
-              <q-td :props="props">{{ formatLevel(props.row.level) }}</q-td>
+              <q-td :props="props">{{ formatLevel(props.row.level) }} cm</q-td>
             </template>
             <template v-slot:body-cell-timestamp="props">
               <q-td :props="props">{{ formatTime(props.row.timestamp) }}</q-td>
@@ -66,7 +82,7 @@
               <div class="text-h6">{{ rowsCount }}</div>
             </div>
             <div>
-              <div class="text-caption">Số bản ghi ở mức NGUY HIỂM (&gt; {{ TH_DANGER }} m)</div>
+              <div class="text-caption">Số bản ghi ở mức NGUY HIỂM (&gt; {{ TH_DANGER }} cm)</div>
               <div class="text-h6">{{ dangerCount }}</div>
             </div>
           </div>
@@ -99,7 +115,7 @@ let chartInstance = null
 const noChartData = ref(false)
 
 // thresholds must be same as other pages (adjust if needed)
-const TH_DANGER = 2.0
+const TH_DANGER = 80 // cm
 
 const filterFrom = ref('')
 const filterTo = ref('')
@@ -107,15 +123,21 @@ const pagination = ref({ page: 1, rowsPerPage: 10 })
 
 const columns = [
   { name: 'id', label: 'ID', field: 'id', sortable: true },
-  { name: 'level', label: 'Mực nước (m)', field: 'level', sortable: true },
-  { name: 'timestamp', label: 'Thời gian', field: 'timestamp', sortable: true }
+  { name: 'level', label: 'Mực nước (cm)', field: 'level', sortable: true },
+  { name: 'timestamp', label: 'Thời gian', field: 'timestamp', sortable: true },
 ]
 
-function formatLevel(v) { return v == null ? '--' : Number(v).toFixed(2) }
-function formatTime(ts) { if (!ts) return '--'; return new Date(ts).toLocaleString() }
+function formatLevel(v) {
+  return v == null ? '--' : Number(v).toFixed(0)
+}
+
+function formatTime(ts) {
+  if (!ts) return '--'
+  return new Date(ts).toLocaleString()
+}
 
 const rowsCount = computed(() => levels.value.length)
-const dangerCount = computed(() => levels.value.filter(l => Number(l.level) > TH_DANGER).length)
+const dangerCount = computed(() => levels.value.filter((l) => Number(l.level) > TH_DANGER).length)
 
 // chuyển "2025-11-4" hoặc "2025-11-04" thành Date(2025, 10, 4)
 function parseDateSafeYMD(s) {
@@ -139,7 +161,6 @@ function parseDateSafeYMDEnd(s) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
 }
 
-
 // filtered rows by date
 const filteredRows = computed(() => {
   let arr = levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
@@ -148,14 +169,14 @@ const filteredRows = computed(() => {
   const fTo = parseDateSafeYMDEnd(filterTo.value)
 
   if (fFrom) {
-    arr = arr.filter(r => {
+    arr = arr.filter((r) => {
       const t = new Date(r.timestamp)
       return t >= fFrom
     })
   }
 
   if (fTo) {
-    arr = arr.filter(r => {
+    arr = arr.filter((r) => {
       const t = new Date(r.timestamp)
       return t <= fTo
     })
@@ -163,7 +184,6 @@ const filteredRows = computed(() => {
 
   return arr
 })
-
 
 import { ref, onMounted, computed, nextTick } from 'vue' // thêm nextTick vào import
 
@@ -173,7 +193,7 @@ async function loadAll() {
   loading.value = true
   try {
     const res = await waterService.getAllLevels()
-    levels.value = Array.isArray(res) ? res : (res || [])
+    levels.value = Array.isArray(res) ? res : res || []
   } catch (err) {
     console.error('loadAll error', err)
     Notify.create({ type: 'negative', message: 'Không tải được dữ liệu lịch sử' })
@@ -188,17 +208,21 @@ async function loadAll() {
   }
 }
 
-
 function renderChart() {
   // destroy previous chart safely
   if (chartInstance) {
-    try { chartInstance.destroy() } catch (err) { void err; }
+    try {
+      chartInstance.destroy()
+    } catch (err) {
+      void err
+    }
     chartInstance = null
   }
 
   // source = filteredRows (so default is full dataset when no filter)
-  const source = (Array.isArray(filteredRows.value) ? filteredRows.value : []).slice()
-    .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
+  const source = (Array.isArray(filteredRows.value) ? filteredRows.value : [])
+    .slice()
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
 
   if (!source || source.length === 0) {
     noChartData.value = true
@@ -211,8 +235,8 @@ function renderChart() {
   const ctxEl = historyCanvas.value
   if (!ctxEl) return
 
-  const labels = source.map(r => new Date(r.timestamp).toLocaleString())
-  const data = source.map(r => Number(r.level))
+  const labels = source.map((r) => new Date(r.timestamp).toLocaleString())
+  const data = source.map((r) => Number(r.level))
 
   // small debounce for resize
   if (typeof Chart !== 'undefined' && Chart.defaults) Chart.defaults.resizeDelay = 200
@@ -222,25 +246,26 @@ function renderChart() {
     type: 'line',
     data: {
       labels,
-      datasets: [{
-        label: 'Mực nước (m)',
-        data,
-        fill: true,
-        tension: 0.3,
-        borderWidth: 2,
-        pointRadius: 3
-      }]
+      datasets: [
+        {
+          label: 'Mực nước (cm)',
+          data,
+          fill: true,
+          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 3,
+        },
+      ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       resizeDelay: 200,
       scales: { x: { ticks: { maxRotation: 45 } } },
-      plugins: { legend: { display: false } }
-    }
+      plugins: { legend: { display: false } },
+    },
   })
 }
-
 
 function applyDateFilter() {
   // filteredRows là computed, nhưng ta cần vẽ lại biểu đồ theo filter mới
@@ -254,11 +279,10 @@ function clearDateFilter() {
   renderChart()
 }
 
-
 function gotoRecord() {
   const id = Number(gotoId.value)
   if (!id) return
-  const found = levels.value.find(r => r.id === id)
+  const found = levels.value.find((r) => r.id === id)
   if (!found) {
     Notify.create({ type: 'warning', message: 'Không tìm thấy bản ghi id=' + id })
     return
