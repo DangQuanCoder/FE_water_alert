@@ -3,15 +3,15 @@
     <q-card class="max-w-md mx-auto">
       <q-card-section>
         <div class="text-h6">Xác thực OTP</div>
-        <div class="text-caption text-grey">Nhập mã OTP gửi đến số {{ phone }}</div>
       </q-card-section>
 
       <q-card-section>
         <q-form @submit.prevent="onVerify" class="q-gutter-md">
-          <q-input v-model="otp" label="Mã OTP" maxlength="6" required />
-          <div class="row q-gutter-sm q-mt-md">
-            <q-btn type="submit" label="Xác thực" color="primary" />
-            <q-btn flat label="Quay lại Đăng ký" to="/register" />
+          <q-input v-model="phone" label="Số điện thoại" readonly />
+          <q-input v-model="otp" label="OTP" maxlength="6" :rules="[v => !!v || 'OTP bắt buộc']" />
+          <div class="row q-mt-md">
+            <q-btn type="submit" label="Xác nhận OTP" color="primary" />
+            <q-btn flat label="Quay lại đăng ký" @click="goRegister" />
           </div>
         </q-form>
       </q-card-section>
@@ -20,34 +20,81 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from 'stores/auth'
 import { Notify } from 'quasar'
 
-const route = useRoute()
 const router = useRouter()
+const route = useRoute()
 const store = useAuthStore()
 
-const phone = route.query.phone || ''
 const otp = ref('')
+const phone = ref('')
+
+// pendingRegister contains username, fullName, email, phone, password
+let pendingRegister = null
+
+onMounted(() => {
+  phone.value = route.query.phone || ''
+
+  const raw = localStorage.getItem('pendingRegister')
+  if (raw) {
+    try {
+      pendingRegister = JSON.parse(raw)
+    } catch {
+      // invalid JSON or corrupt -> ignore
+      pendingRegister = null
+    }
+
+    if (!phone.value && pendingRegister?.phone) {
+      phone.value = pendingRegister.phone
+    }
+  }
+})
+
+function goRegister () {
+  router.push('/register')
+}
 
 async function onVerify () {
-  try {
-    console.log('Xác thực OTP:', otp.value)
-    const res = await store.verifyOtp(phone, otp.value)
-    console.log('verify response:', res)
+  if (!otp.value) {
+    Notify.create({ type: 'negative', message: 'Vui lòng nhập OTP' })
+    return
+  }
 
-    if (res.success) {
-      Notify.create({ type: 'positive', message: 'Xác thực thành công!' })
-      if (res.role === 'admin') router.push('/admin')
-      else router.push('/user')
+  if (!pendingRegister) {
+    Notify.create({ type: 'negative', message: 'Không có dữ liệu đăng ký. Vui lòng đăng ký lại.' })
+    router.push('/register')
+    return
+  }
+
+  const payload = {
+    phone: phone.value,
+    otp: otp.value,
+    username: pendingRegister.username,
+    fullName: pendingRegister.fullName,
+    email: pendingRegister.email,
+    password: pendingRegister.password
+  }
+
+  try {
+    const res = await store.verifyOtp(payload)
+    console.log('verify res', res)
+
+    if (res?.success) {
+      localStorage.removeItem('pendingRegister')
+      Notify.create({ type: 'positive', message: res.message || 'Đã xác thực thành công' })
+      router.push('/login')
     } else {
-      Notify.create({ type: 'negative', message: res.message || 'OTP không đúng' })
+      // backend may return errors array from validation or message
+      const message = res?.message || (Array.isArray(res?.errors) ? res.errors.map(e => e.message).join(', ') : 'Xác thực thất bại')
+      Notify.create({ type: 'negative', message })
     }
   } catch (err) {
-    console.error('Lỗi xác thực OTP:', err)
-    Notify.create({ type: 'negative', message: 'Lỗi hệ thống khi xác thực OTP.' })
+    console.error('verify error', err)
+    const msg = err?.response?.data?.message || err?.message || 'Lỗi khi gọi API xác thực'
+    Notify.create({ type: 'negative', message: msg })
   }
 }
 </script>

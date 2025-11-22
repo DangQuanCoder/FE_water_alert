@@ -5,6 +5,7 @@
       <q-card-section class="row items-center">
         <div class="text-h6">Quản lý người dùng</div>
         <q-space />
+        <q-btn dense color="warning" label="Test Delete (direct fetch)" @click="testDirectFetch" />
       </q-card-section>
 
       <q-separator />
@@ -29,7 +30,7 @@
       </q-card-section>
     </q-card>
 
-    <!-- Edit dialog -->
+    <!-- Edit dialog (KHÔI PHỤC) -->
     <q-dialog v-model="dialog">
       <q-card style="min-width: 420px">
         <q-card-section>
@@ -64,7 +65,6 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const store = useAuthStore()
 
-// guard UI: if not admin, redirect
 if (!store.role || store.role.toString().toLowerCase() !== 'admin') {
   Notify.create({ type: 'negative', message: 'Bạn không có quyền truy cập trang này' })
   router.push('/')
@@ -75,7 +75,6 @@ const loading = ref(false)
 const dialog = ref(false)
 const editMode = ref(false)
 const saving = ref(false)
-// track deleting ids for per-row loading indicator (use Set to handle string keys)
 const deletingIds = ref(new Set())
 
 const form = reactive({
@@ -102,7 +101,6 @@ const roleOptions = [
   { label: 'ADMIN', value: 'ADMIN' },
 ]
 
-// Try to get current user id from store (support multiple store shapes)
 const currentUserId = store.id || store.user?.id || store.userId || null
 
 async function loadUsers() {
@@ -112,8 +110,7 @@ async function loadUsers() {
     users.value = Array.isArray(res) ? res : res.users || res.data || []
   } catch (err) {
     console.error('loadUsers error', err)
-    const msg = err?.response?.data?.message || 'Không tải được danh sách người dùng'
-    Notify.create({ type: 'negative', message: msg })
+    Notify.create({ type: 'negative', message: 'Không tải được danh sách người dùng' })
   } finally {
     loading.value = false
   }
@@ -158,7 +155,6 @@ async function save() {
     await userService.updateUser(form.id, payload)
     Notify.create({ type: 'positive', message: 'Cập nhật thành công' })
     dialog.value = false
-    // update in-place
     const idx = users.value.findIndex((u) => String(u.id) === String(form.id))
     if (idx !== -1) {
       users.value[idx] = { ...users.value[idx], ...payload }
@@ -167,8 +163,10 @@ async function save() {
     }
   } catch (err) {
     console.error('save error', err)
-    const msg = err?.response?.data?.message || 'Lỗi khi lưu người dùng'
-    Notify.create({ type: 'negative', message: msg })
+    Notify.create({
+      type: 'negative',
+      message: err?.response?.data?.message || 'Lỗi khi lưu người dùng',
+    })
   } finally {
     saving.value = false
   }
@@ -191,8 +189,6 @@ function confirmDelete(row) {
     cancel: true,
     persistent: true,
   }).onOk(() => {
-    // debug log
-    console.log('[confirmDelete] confirmed id=', row.id)
     doDelete(row.id)
   })
 }
@@ -202,18 +198,25 @@ async function doDelete(id) {
   deletingIds.value.add(String(id))
   try {
     const res = await userService.deleteUser(id)
-    console.log('[doDelete] response:', res)
-    Notify.create({ type: 'positive', message: 'Xóa thành công' })
-    users.value = users.value.filter((u) => String(u.id) !== String(id))
+    console.log('[doDelete] axios res status:', res?.status, res)
+    if (res?.status === 204 || (res?.status >= 200 && res?.status < 300)) {
+      Notify.create({ type: 'positive', message: 'Xóa thành công' })
+      users.value = users.value.filter((u) => String(u.id) !== String(id))
+    } else {
+      Notify.create({ type: 'negative', message: 'Xóa thất bại (status ' + res?.status + ')' })
+    }
   } catch (err) {
     console.error('[doDelete] error:', err)
-    const msg = err?.response?.data?.message || err?.message || 'Xóa thất bại'
-    Notify.create({ type: 'negative', message: msg })
+    Notify.create({
+      type: 'negative',
+      message: err?.response?.data || err?.message || 'Xóa thất bại',
+    })
   } finally {
     deletingIds.value.delete(String(id))
   }
 }
 
+/* testDirectFetch omitted here; keep previous version if you want it */
 onMounted(() => {
   loadUsers()
 })

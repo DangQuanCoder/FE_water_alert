@@ -1,3 +1,4 @@
+// src/router/routes.js
 const routes = [
   {
     path: '/',
@@ -14,9 +15,16 @@ const routes = [
       { path: 'map', component: () => import('pages/MapPage.vue') },
       { path: 'history', component: () => import('pages/HistoryPage.vue') },
 
-      // Role-protected pages (meta.role)
+      // Admin pages
       { path: 'admin', component: () => import('pages/AdminPage.vue'), meta: { role: ['admin'] } },
-      { path: 'user', component: () => import('pages/UserPage.vue'), meta: { role: ['user','admin'] } }
+      {
+        path: 'admin/users',
+        component: () => import('pages/AdminUsersPage.vue'),
+        meta: { role: ['admin'] }
+      },
+
+      // User pages
+      { path: 'user', component: () => import('pages/UserPage.vue'), meta: { role: ['user', 'admin'] } }
     ]
   },
 

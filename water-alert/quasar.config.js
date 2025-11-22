@@ -72,26 +72,25 @@ export default defineConfig((/* ctx */) => {
 
     // Full list of options: https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#devserver
     devServer: {
-      // https: true,
-      open: true, // opens browser window automatically
+      port: 9000, // frontend chạy ở http://localhost:9000
+      open: true,
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8080', // backend Spring Boot
+          changeOrigin: true,
+          // Nếu backend dùng prefix /api giữ lại; nếu backend không có /api, rewrite về ''
+          rewrite: (path) => path.replace(/^\/api/, '/api'),
+        },
+        // nếu cần websocket, thêm rule với ws: true
+      },
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#framework
     framework: {
       config: {},
 
-      // iconSet: 'material-icons', // Quasar icon set
-      // lang: 'en-US', // Quasar language pack
-
-      // For special cases outside of where the auto-import strategy can have an impact
-      // (like functional components as one of the examples),
-      // you can manually specify Quasar components/directives to be available everywhere:
-      //
-      // components: [],
-      // directives: [],
-
       // Quasar plugins
-      plugins: ['Notify'],
+      plugins: ['Notify', 'Dialog'],
     },
 
     // animations: 'all', // --- includes all animations

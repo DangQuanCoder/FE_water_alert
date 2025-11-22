@@ -1,23 +1,44 @@
 // src/boot/axios.js
-// Minimal, safe axios boot module
+import { boot } from 'quasar/wrappers'
 import axios from 'axios'
 
-// dùng biến môi trường Vite; fallback về localhost nếu chưa set
-const baseURL = import.meta.env.VITE_API_BASE || 'http://localhost:9000'
-
-export const api = axios.create({
-  baseURL,
-  headers: { 'Content-Type': 'application/json' }
+const api = axios.create({
+  baseURL: 'http://localhost:8080',
+  headers: {
+    'Content-Type': 'application/json',
+  },
 })
 
-// attach token nếu có
-api.interceptors.request.use(cfg => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    cfg.headers = cfg.headers || {}
-    cfg.headers.Authorization = `Bearer ${token}`
-  }
-  return cfg
-}, err => Promise.reject(err))
+// Auto attach token and log it for debug
+api.interceptors.request.use(
+  (cfg) => {
+    try {
+      const token =
+        localStorage.getItem('token') ||
+        localStorage.getItem('accessToken') ||
+        localStorage.getItem('jwt')
+      if (token) {
+        cfg.headers.Authorization = `Bearer ${token}`
+      }
+      console.log('[api.request] ', cfg.method?.toUpperCase(), cfg.url, ' Authorization:', !!token)
+    } catch {
+      // intentionally ignore
+    }
+    return cfg
+  },
+  (err) => Promise.reject(err),
+)
 
-// NOTE: NO `export default` here — only named export `api`.
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    console.error('[api.response.error]', err?.response?.status, err?.response?.data)
+    return Promise.reject(err)
+  },
+)
+
+export default boot(({ app }) => {
+  app.config.globalProperties.$api = api
+})
+
+export { api }
