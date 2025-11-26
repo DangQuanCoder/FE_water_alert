@@ -38,6 +38,16 @@
           <q-item-section avatar><q-icon name="supervisor_account" /></q-item-section>
           <q-item-section>Quản lý người dùng</q-item-section>
         </q-item>
+        <q-item clickable v-ripple to="/admin/areas" v-if="isAdmin">
+          <q-item-section avatar><q-icon name="map" /></q-item-section>
+          <q-item-section>Quản lý khu vực</q-item-section>
+        </q-item>
+
+        <q-item clickable v-ripple to="/admin/devices" v-if="isAdmin">
+          <q-item-section avatar><q-icon name="devices" /></q-item-section>
+          <q-item-section>Quản lý thiết bị</q-item-section>
+        </q-item>
+
       </q-list>
     </q-drawer>
 

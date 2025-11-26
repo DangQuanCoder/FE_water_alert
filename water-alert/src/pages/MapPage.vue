@@ -1,4 +1,3 @@
-<!-- src/pages/MapPage.vue -->
 <template>
   <q-page class="q-pa-md">
     <div class="row">
@@ -40,13 +39,18 @@
                     size="36px"
                     :style="{ backgroundColor: statusColorFor(r.level), color: 'white' }"
                   >
-                    {{ Math.round(Number(r.level)) }}
+                    {{ Math.round(Number(r.level || 0)) }}
                   </q-avatar>
                 </q-item-section>
+
                 <q-item-section>
                   <q-item-label>Level: {{ formatLevel(r.level) }} cm</q-item-label>
-                  <q-item-label caption>{{ formatTime(r.timestamp) }}</q-item-label>
+                  <q-item-label caption>
+                    {{ formatTime(r.timestamp) }}
+                    <span v-if="r.deviceId"> — {{ r.deviceId }}</span>
+                  </q-item-label>
                 </q-item-section>
+
                 <q-item-section side>
                   <q-btn
                     dense
@@ -57,6 +61,7 @@
                   />
                 </q-item-section>
               </q-item>
+
               <q-item v-if="filteredSortedLevels.length === 0">
                 <q-item-section>
                   <div class="text-caption text-grey-6">Không tìm thấy bản ghi</div>
@@ -102,20 +107,25 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Notify } from 'quasar'
 import * as waterService from 'src/services/waterService'
+import * as deviceService from 'src/services/deviceService' // <-- mới
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-// config thresholds (same as UserPage)
-const THRESHOLD_WARNING = 40
-const THRESHOLD_DANGER = 80
+// thresholds (cm)
+const THRESHOLD_WARNING = 10
+const THRESHOLD_DANGER = 60
 
 const map = ref(null)
-const markers = ref([]) // array of L.Circle or marker
+const markers = ref([])
+const markersMap = ref(new Map()) // id -> marker
 const levels = ref([])
 const loading = ref(false)
 const autoRefresh = ref(true)
 let refreshTimer = null
+
+// device locations map: deviceId -> { lat, lng }
+const deviceLocations = ref(new Map())
 
 const filterStatus = ref(null)
 const filterOptions = [
@@ -135,16 +145,16 @@ function statusFor(level) {
 
 function statusColorFor(level) {
   const s = statusFor(level)
-  if (s === 'danger') return '#e53935' // red
-  if (s === 'warning') return '#fb8c00' // orange
-  if (s === 'normal') return '#43a047' // green
+  if (s === 'danger') return '#e53935'
+  if (s === 'warning') return '#fb8c00'
+  if (s === 'normal') return '#43a047'
   return '#9e9e9e'
 }
 
 function createMap() {
   if (map.value) return
-  // center to some coordinates (fallback)
-  const center = [10.7769, 106.70098] // HCM sample
+  // fallback center (Hà Nội được dùng tự động nếu device có tọa độ)
+  const center = [21.028511, 105.804817]
   map.value = L.map('map', { preferCanvas: true }).setView(center, 11)
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -154,43 +164,84 @@ function createMap() {
 
 function clearMarkers() {
   markers.value.forEach((m) => {
-    try {
-      map.value.removeLayer(m)
-    } catch (err) {
-      void err
-    }
+    try { map.value.removeLayer(m) } catch (err) { void err }
   })
   markers.value = []
+  markersMap.value.clear()
 }
 
+function formatLevel(v) {
+  if (v === null || v === undefined) return '--'
+  return Number(v).toFixed(0) // hiển thị cm nguyên
+}
+function formatTime(ts) {
+  if (!ts) return '--'
+  return new Date(ts).toLocaleString()
+}
+
+/**
+ * compute fallback jitter position only when no real coords available
+ */
+function computeJitterPosition(baseLat, baseLng, idx, id) {
+  const jitter = 0.02
+  const lat = baseLat + ((idx % 5) - 2) * jitter + ((id % 7) - 3) * 0.002
+  const lng = baseLng + (Math.floor(idx / 5) - 2) * jitter + ((id % 5) - 2) * 0.002
+  return [lat, lng]
+}
+
+/**
+ * main marker creation: use deviceLocations if present
+ */
 function addMarkersFromLevels(data) {
   clearMarkers()
   if (!map.value) return
 
-  // We don't have sensor location in BE. We'll scatter markers around center for demo,
-  // but if your BE provides coordinates, use them instead.
-  // For now, if data includes id-based pseudo-locations we compute jitter.
-  const center = map.value.getCenter()
-  const baseLat = center.lat
-  const baseLng = center.lng
+  // nếu muốn chỉ 1 marker / device (latest), uncomment nhóm ở block bên dưới
+  // const groupedByDevice = new Map()
+  // (data || []).forEach(item => {
+  //   const key = item.deviceId ?? `__id_${item.id}`
+  //   const prev = groupedByDevice.get(key)
+  //   if (!prev || new Date(item.timestamp) > new Date(prev.timestamp)) groupedByDevice.set(key, item)
+  // })
+  // const sorted = Array.from(groupedByDevice.values()).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))
 
-  // sort descending by timestamp so newest first
   const sorted = (data || []).slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
 
+  // if there is at least one device with real coords, center map to first such device
+  const firstWithCoords = sorted.find(it => {
+    const dloc = deviceLocations.value.get(it.deviceId)
+    return dloc && dloc.lat != null && dloc.lng != null
+  })
+  if (firstWithCoords) {
+    const d = deviceLocations.value.get(firstWithCoords.deviceId)
+    try { map.value.setView([Number(d.lat), Number(d.lng)], Math.max(map.value.getZoom(), 11)) } catch(e){ void e }
+  }
+
   sorted.forEach((item, idx) => {
-    // pseudo location: jitter around center
-    const jitter = 0.02 // ~2km depending on zoom
-    const lat = baseLat + ((idx % 5) - 2) * jitter + ((item.id % 7) - 3) * 0.002
-    const lng = baseLng + (Math.floor(idx / 5) - 2) * jitter + ((item.id % 5) - 2) * 0.002
+    // try get coords from deviceLocations
+    let lat = null, lng = null
+    if (item.deviceId) {
+      const d = deviceLocations.value.get(item.deviceId)
+      if (d) { lat = Number(d.lat); lng = Number(d.lng) }
+    }
+    // fallback: maybe the level record itself has lat/lng fields
+    if ((lat == null || lng == null) && (item.latitude != null || item.lat != null)) {
+      lat = Number(item.latitude ?? item.lat)
+      lng = Number(item.longitude ?? item.lng)
+    }
+
+    if (lat == null || lng == null) {
+      // fallback jitter around current map center
+      const center = map.value.getCenter()
+      const [jl, jg] = computeJitterPosition(center.lat, center.lng, idx, item.id ?? idx)
+      lat = jl; lng = jg
+    }
+
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return
 
     const color = statusColorFor(item.level)
-    // computeRadius: base 40m -> tăng theo cm, clamp tối đa 160
-    function computeRadiusForCm(levelCm) {
-      const v = Number(levelCm || 0)
-      // radius (m) = base 40 + v * 1.5 (v là cm), clamp 160
-      return 40 + Math.min(Math.max(v * 1.5, 0), 120)
-    }
-    const radius = computeRadiusForCm(item.level) // radius in meters
+    // radius in meters — scale reasonable for cm values
+    const radius = 40 + Math.min(Math.max(Number(item.level || 0) * 1.2, 0), 200)
 
     const circle = L.circle([lat, lng], {
       color,
@@ -200,16 +251,14 @@ function addMarkersFromLevels(data) {
     }).addTo(map.value)
 
     const popupContent = `
-  <div>
-    <div><strong>Mức:</strong> ${formatLevel(item.level)} cm</div>
-    <div><strong>Thời gian:</strong> ${formatTime(item.timestamp)}</div>
-    <div style="margin-top:6px;"><a href="#" data-id="${item.id}" class="open-history-link">Xem lịch sử</a></div>
-  </div>
-`
-
+      <div>
+        <div><strong>Mức:</strong> ${formatLevel(item.level)} cm</div>
+        <div><strong>Thời gian:</strong> ${formatTime(item.timestamp)}</div>
+        <div><strong>Toạ độ:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</div>
+        <div style="margin-top:6px;"><a href="#" data-id="${item.id}" class="open-history-link">Xem lịch sử</a></div>
+      </div>
+    `
     circle.bindPopup(popupContent)
-
-    // capture clicks on popup link
     circle.on('popupopen', (ev) => {
       const popupEl = ev.popup.getElement()
       if (!popupEl) return
@@ -223,45 +272,30 @@ function addMarkersFromLevels(data) {
     })
 
     markers.value.push(circle)
+    markersMap.value.set(item.id, circle)
   })
 }
 
-// focus map on marker corresponding to a level record
 function focusOnMarker(record) {
-  if (!map.value || markers.value.length === 0) return
-  // naive find by index of sorted list (same order as added)
-  const sorted = levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-  const idx = sorted.findIndex((r) => r.id === record.id)
-  if (idx === -1) return
-  const m = markers.value[idx]
+  if (!map.value || !record) return
+  const m = markersMap.value.get(record.id)
   if (m) {
-    map.value.setView(m.getLatLng(), Math.max(map.value.getZoom(), 13), { animate: true })
-    m.openPopup()
+    try {
+      map.value.setView(m.getLatLng(), Math.max(map.value.getZoom(), 13), { animate: true })
+      m.openPopup()
+      return
+    } catch (err) { void err }
   }
 }
 
 function openHistory(record) {
-  // navigate to history page with optional query param id/time
   router.push({ path: '/history', query: { id: record.id, t: record.timestamp } })
-}
-
-function formatLevel(v) {
-  if (v === null || v === undefined) return '--'
-  // hiển thị số nguyên (cm). Nếu muốn 1 chữ số thập phân, đổi toFixed(1)
-  return Number(v).toFixed(0)
-}
-
-function formatTime(ts) {
-  if (!ts) return '--'
-  return new Date(ts).toLocaleString()
 }
 
 const filteredSortedLevels = ref([])
 
 function applyFilterAndRender() {
-  const all = (levels.value || [])
-    .slice()
-    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  const all = (levels.value || []).slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
   const f = filterStatus.value
   filteredSortedLevels.value = all.filter((r) => {
     if (!f) return true
@@ -274,9 +308,34 @@ function applyFilterAndRender() {
   addMarkersFromLevels(filteredSortedLevels.value)
 }
 
+/**
+ * Load device locations map first (best-effort), then load levels.
+ */
+async function loadDeviceLocations() {
+  try {
+    const res = await deviceService.getAllDevices()
+    // res expected: [{ deviceId, latitude, longitude, ... }, ...]
+    if (Array.isArray(res)) {
+      deviceLocations.value.clear()
+      res.forEach(d => {
+        const id = d.deviceId ?? d.id ?? null
+        if (!id) return
+        const lat = d.latitude ?? d.lat ?? null
+        const lng = d.longitude ?? d.lng ?? null
+        if (lat != null && lng != null) deviceLocations.value.set(String(id), { lat: Number(lat), lng: Number(lng) })
+      })
+    }
+  } catch (err) {
+    // nếu không có endpoint devices, bỏ qua (chỉ dùng jitter)
+    void err
+  }
+}
+
 async function loadLevels() {
   loading.value = true
   try {
+    // try load device locations (best-effort)
+    await loadDeviceLocations()
     const res = await waterService.getAllLevels()
     levels.value = Array.isArray(res) ? res : res || []
     applyFilterAndRender()
@@ -288,7 +347,6 @@ async function loadLevels() {
   }
 }
 
-// watch autoRefresh toggle
 watch(autoRefresh, (v) => {
   if (v) {
     refreshTimer = setInterval(() => loadLevels(), 30_000)
@@ -300,7 +358,6 @@ watch(autoRefresh, (v) => {
   }
 })
 
-// watch filter change
 watch(filterStatus, () => {
   applyFilterAndRender()
 })
@@ -320,19 +377,12 @@ onBeforeUnmount(() => {
   }
   clearMarkers()
   if (map.value) {
-    try {
-      map.value.remove()
-    } catch (err) {
-      void err
-    }
+    try { map.value.remove() } catch (err) { void err }
     map.value = null
   }
 })
 </script>
 
 <style scoped>
-/* ensure leaflet images load from node_modules path if needed */
-.leaflet-container img {
-  max-width: none !important;
-}
+.leaflet-container img { max-width: none !important; }
 </style>
