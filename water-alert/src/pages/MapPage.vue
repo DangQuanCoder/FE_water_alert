@@ -180,86 +180,94 @@ function formatTime(ts) {
 }
 
 /**
- * compute fallback jitter position only when no real coords available
- */
-function computeJitterPosition(baseLat, baseLng, idx, id) {
-  const jitter = 0.02
-  const lat = baseLat + ((idx % 5) - 2) * jitter + ((id % 7) - 3) * 0.002
-  const lng = baseLng + (Math.floor(idx / 5) - 2) * jitter + ((id % 5) - 2) * 0.002
-  return [lat, lng]
-}
-
-/**
  * main marker creation: use deviceLocations if present
+ */
+/**
+ * Thay thế hàm addMarkersFromLevels cũ bằng phiên bản nhóm theo device
+ * - Chỉ 1 marker / device (mức mới nhất)
+ * - Dùng deviceLocations nếu có coords
+ * - Nếu thiết bị không có coords nhưng record level có latitude/longitude, dùng coords đó
+ * - Không dùng jitter (để tránh nhiều chấm rác)
  */
 function addMarkersFromLevels(data) {
   clearMarkers()
   if (!map.value) return
 
-  // nếu muốn chỉ 1 marker / device (latest), uncomment nhóm ở block bên dưới
-  // const groupedByDevice = new Map()
-  // (data || []).forEach(item => {
-  //   const key = item.deviceId ?? `__id_${item.id}`
-  //   const prev = groupedByDevice.get(key)
-  //   if (!prev || new Date(item.timestamp) > new Date(prev.timestamp)) groupedByDevice.set(key, item)
-  // })
-  // const sorted = Array.from(groupedByDevice.values()).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp))
-
-  const sorted = (data || []).slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-
-  // if there is at least one device with real coords, center map to first such device
-  const firstWithCoords = sorted.find(it => {
-    const dloc = deviceLocations.value.get(it.deviceId)
-    return dloc && dloc.lat != null && dloc.lng != null
+  // Nhóm theo deviceId (nếu có), nếu không có deviceId thì group theo "__rec_<id>"
+  const grouped = new Map()
+  ;(data || []).forEach(item => {
+    const key = item.deviceId ? String(item.deviceId) : `__rec_${item.id ?? Math.random()}`
+    const prev = grouped.get(key)
+    if (!prev) grouped.set(key, item)
+    else {
+      // keep newest (so we end up with latest level per device)
+      if (new Date(item.timestamp) > new Date(prev.timestamp)) grouped.set(key, item)
+    }
   })
-  if (firstWithCoords) {
-    const d = deviceLocations.value.get(firstWithCoords.deviceId)
-    try { map.value.setView([Number(d.lat), Number(d.lng)], Math.max(map.value.getZoom(), 11)) } catch(e){ void e }
+
+  // If there is at least one device with coords, center to the first such device
+  const firstWithCoordsKey = Array.from(grouped.keys()).find(k => {
+    const it = grouped.get(k)
+    const dloc = it.deviceId ? deviceLocations.value.get(it.deviceId) : null
+    if (dloc && dloc.lat != null && dloc.lng != null) return true
+    if (it.latitude != null || it.lat != null) return true
+    return false
+  })
+  if (firstWithCoordsKey) {
+    const it = grouped.get(firstWithCoordsKey)
+    const dl = it.deviceId ? deviceLocations.value.get(it.deviceId) : null
+    let lat = dl ? Number(dl.lat) : (it.latitude ?? it.lat)
+    let lng = dl ? Number(dl.lng) : (it.longitude ?? it.lng)
+    if (lat != null && lng != null) {
+      try { map.value.setView([Number(lat), Number(lng)], Math.max(map.value.getZoom(), 11)) } catch(e){ void e }
+    }
   }
 
-  sorted.forEach((item, idx) => {
-    // try get coords from deviceLocations
+  // Iterate grouped and create one marker per group
+  Array.from(grouped.entries()).forEach(([key, item]) => {
     let lat = null, lng = null
+
+    // Prefer deviceLocations if deviceId exists
     if (item.deviceId) {
-      const d = deviceLocations.value.get(item.deviceId)
-      if (d) { lat = Number(d.lat); lng = Number(d.lng) }
+      const d = deviceLocations.value.get(String(item.deviceId))
+      if (d && d.lat != null && d.lng != null) {
+        lat = Number(d.lat); lng = Number(d.lng)
+      }
     }
-    // fallback: maybe the level record itself has lat/lng fields
+
+    // Fallback to coordinates present in the level record
     if ((lat == null || lng == null) && (item.latitude != null || item.lat != null)) {
       lat = Number(item.latitude ?? item.lat)
       lng = Number(item.longitude ?? item.lng)
     }
 
-    if (lat == null || lng == null) {
-      // fallback jitter around current map center
-      const center = map.value.getCenter()
-      const [jl, jg] = computeJitterPosition(center.lat, center.lng, idx, item.id ?? idx)
-      lat = jl; lng = jg
+    // If no coordinates available -> skip (do not jitter to avoid many stray dots)
+    if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) {
+      return
     }
 
-    if (Number.isNaN(lat) || Number.isNaN(lng)) return
-
     const color = statusColorFor(item.level)
-    // radius in meters — scale reasonable for cm values
-    const radius = 40 + Math.min(Math.max(Number(item.level || 0) * 1.2, 0), 200)
-
-    const circle = L.circle([lat, lng], {
+    // use circleMarker (fixed pixel radius) to show device point clearly
+    const marker = L.circleMarker([lat, lng], {
       color,
       fillColor: color,
-      fillOpacity: 0.6,
-      radius,
+      fillOpacity: 0.9,
+      radius: 8,
+      weight: 1
     }).addTo(map.value)
 
     const popupContent = `
       <div>
+        <div><strong>Thiết bị:</strong> ${item.deviceId ?? ('id:' + (item.id ?? ''))}</div>
         <div><strong>Mức:</strong> ${formatLevel(item.level)} cm</div>
         <div><strong>Thời gian:</strong> ${formatTime(item.timestamp)}</div>
-        <div><strong>Toạ độ:</strong> ${lat.toFixed(6)}, ${lng.toFixed(6)}</div>
-        <div style="margin-top:6px;"><a href="#" data-id="${item.id}" class="open-history-link">Xem lịch sử</a></div>
+        <div style="margin-top:6px;"><a href="#" data-key="${key}" class="open-history-link">Xem lịch sử</a></div>
       </div>
     `
-    circle.bindPopup(popupContent)
-    circle.on('popupopen', (ev) => {
+    marker.bindPopup(popupContent)
+
+    // Attach click handler for popup link
+    marker.on('popupopen', (ev) => {
       const popupEl = ev.popup.getElement()
       if (!popupEl) return
       const link = popupEl.querySelector('.open-history-link')
@@ -271,22 +279,39 @@ function addMarkersFromLevels(data) {
       }
     })
 
-    markers.value.push(circle)
-    markersMap.value.set(item.id, circle)
+    // store markers keyed by deviceKey (so focusOnMarker can use record.id or deviceId)
+    markers.value.push(marker)
+    // use deviceKey if deviceId exists, else use '__rec_<id>'
+    const storageKey = item.deviceId ? String(item.deviceId) : `__rec_${item.id ?? key}`
+    markersMap.value.set(storageKey, marker)
   })
 }
 
+/**
+ * focusOnMarker: giờ chấp nhận record có deviceId hoặc chỉ id.
+ * Thử tìm marker theo deviceId trước, nếu không có thì theo record.id (__rec_id).
+ */
 function focusOnMarker(record) {
   if (!map.value || !record) return
-  const m = markersMap.value.get(record.id)
-  if (m) {
-    try {
-      map.value.setView(m.getLatLng(), Math.max(map.value.getZoom(), 13), { animate: true })
-      m.openPopup()
-      return
-    } catch (err) { void err }
+  // try deviceId key first
+  const tryKeys = []
+  if (record.deviceId) tryKeys.push(String(record.deviceId))
+  if (record.id != null) tryKeys.push(`__rec_${record.id}`)
+  // also try record.id raw (in case markersMap used id)
+  if (record.id != null) tryKeys.push(String(record.id))
+
+  for (const k of tryKeys) {
+    const m = markersMap.value.get(k)
+    if (m) {
+      try {
+        map.value.setView(m.getLatLng(), Math.max(map.value.getZoom(), 13), { animate: true })
+        m.openPopup()
+        return
+      } catch (err) { void err }
+    }
   }
 }
+
 
 function openHistory(record) {
   router.push({ path: '/history', query: { id: record.id, t: record.timestamp } })
