@@ -103,6 +103,7 @@
 
 <script setup>
 import { ref, onMounted, watch, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { Notify } from 'quasar'
@@ -111,6 +112,17 @@ import * as deviceService from 'src/services/deviceService' // <-- mới
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
+const pendingFocusDeviceId = ref(null)
+
+watch(() => route.query.deviceId, (val) => {
+  if (val) {
+    pendingFocusDeviceId.value = String(val)
+    // loadLevels để đảm bảo markers được tạo
+    loadLevels().catch(() => {})
+  }
+})
+
 
 // thresholds (cm)
 const THRESHOLD_WARNING = 10

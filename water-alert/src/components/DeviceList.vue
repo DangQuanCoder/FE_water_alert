@@ -53,18 +53,19 @@
     </q-btn>
 
     <!-- Patch location -->
-    <q-btn dense flat round icon="my_location" @click="$emit('patch-location', props.row)">
-      <q-tooltip
-        anchor="top middle"
-        self="bottom middle"
-        transition-show="none"
-        transition-hide="none"
-        transition-show-delay="0"
-        class="bg-grey-9 text-white text-body2"
-      >
-        Cập nhật vị trí thiết bị
-      </q-tooltip>
-    </q-btn>
+    <q-btn dense flat round icon="my_location" aria-label="Xem trên bản đồ"
+       @click.stop="router.push({ path: '/map', query: { deviceId: props.row.deviceId ?? props.row.id } })">
+  <q-tooltip
+    anchor="top middle"
+    self="bottom middle"
+    transition-show="none"
+    transition-hide="none"
+    transition-show-delay="0"
+    class="bg-grey-9 text-white text-body2"
+  >
+    Xem trên bản đồ
+  </q-tooltip>
+</q-btn>
 
     <!-- Delete -->
     <q-btn dense flat round icon="delete" color="negative" @click="$emit('delete', props.row)">
@@ -89,6 +90,8 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
+const router = useRouter()
 
 const props = defineProps({
   devices: { type: Array, default: () => [] },
