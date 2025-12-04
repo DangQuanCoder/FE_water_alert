@@ -5,13 +5,54 @@
       <q-card-section class="row items-center">
         <div class="text-h6">Quản lý người dùng</div>
         <q-space />
-        <!-- Nút TEST đã bị loại bỏ -->
       </q-card-section>
 
       <q-separator />
 
+      <!-- Search bar -->
       <q-card-section>
-        <q-table :rows="users" :columns="columns" row-key="id" flat bordered :loading="loading">
+        <div class="row items-center q-col-gutter-sm">
+          <q-input
+            dense
+            debounce="300"
+            v-model="searchQuery"
+            placeholder="Tìm theo id, username, email, phone..."
+            clearable
+            outlined
+            class="col-12 col-md-6"
+            @input="onSearchInput"
+          >
+            <template v-slot:append>
+              <q-icon name="search" />
+            </template>
+          </q-input>
+
+          <q-select
+            dense
+            v-model="filterRole"
+            :options="roleFilterOptions"
+            outlined
+            class="col-12 col-md-3"
+            emit-value
+            map-options
+            clearable
+            placeholder="Lọc theo role"
+            @input="onSearchInput"
+          />
+
+          <q-btn dense flat icon="refresh" @click="loadUsers" title="Làm mới" />
+        </div>
+      </q-card-section>
+
+      <q-card-section>
+        <q-table
+          :rows="filteredUsers"
+          :columns="columns"
+          row-key="id"
+          flat
+          bordered
+          :loading="loading"
+        >
           <template v-slot:body-cell-actions="props">
             <q-td align="center">
               <q-btn dense flat icon="edit" color="primary" @click="openEdit(props.row)" />
@@ -56,7 +97,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { Notify, Dialog } from 'quasar'
 import * as userService from 'src/services/userAdminService'
 import { useAuthStore } from 'stores/auth'
@@ -66,17 +107,17 @@ const router = useRouter()
 const store = useAuthStore()
 
 // guard UI: if not admin, redirect
-if (!store.role || store.role.toString().toLowerCase() !== 'admin') {
+if (!store.role || String(store.role).toLowerCase() !== 'admin') {
   Notify.create({ type: 'negative', message: 'Bạn không có quyền truy cập trang này' })
   router.push('/')
 }
 
+/* state */
 const users = ref([])
 const loading = ref(false)
 const dialog = ref(false)
 const editMode = ref(false)
 const saving = ref(false)
-// track deleting ids for per-row loading indicator (use Set to handle string keys)
 const deletingIds = ref(new Set())
 
 const form = reactive({
@@ -103,22 +144,71 @@ const roleOptions = [
   { label: 'ADMIN', value: 'ADMIN' },
 ]
 
-// Try to get current user id from store (support multiple store shapes)
+/* search/filter state */
+const searchQuery = ref('')
+const filterRole = ref(null)
+const roleFilterOptions = [
+  { label: 'Tất cả', value: null },
+  { label: 'USER', value: 'USER' },
+  { label: 'ADMIN', value: 'ADMIN' },
+]
+
+let _searchTimer = null
+
+function onSearchInput() {
+  // debounce to avoid heavy computation if needed
+  if (_searchTimer) clearTimeout(_searchTimer)
+  _searchTimer = setTimeout(() => {
+    // computed filteredUsers will react automatically
+    // no other action needed for client-side filtering
+    _searchTimer = null
+  }, 200)
+}
+
+/* current user id (to disable self-delete) */
 const currentUserId = store.id || store.user?.id || store.userId || null
 
+/* load users from service */
 async function loadUsers() {
   loading.value = true
   try {
     const res = await userService.getAllUsers()
+    // ensure users.value is an array
     users.value = Array.isArray(res) ? res : res.users || res.data || []
   } catch (err) {
     console.error('loadUsers error', err)
     Notify.create({ type: 'negative', message: 'Không tải được danh sách người dùng' })
+    users.value = []
   } finally {
     loading.value = false
   }
 }
 
+/* computed: client-side filter */
+const filteredUsers = computed(() => {
+  const q = String(searchQuery.value || '').trim().toLowerCase()
+  const role = filterRole.value
+  let arr = Array.isArray(users.value) ? users.value.slice() : []
+
+  if (q) {
+    arr = arr.filter(u => {
+      if (!u) return false
+      const sId = String(u.id || '').toLowerCase()
+      const sUsername = String(u.username || u.name || '').toLowerCase()
+      const sEmail = String(u.email || '').toLowerCase()
+      const sPhone = String(u.phone || '').toLowerCase()
+      return sId.includes(q) || sUsername.includes(q) || sEmail.includes(q) || sPhone.includes(q)
+    })
+  }
+
+  if (role) {
+    arr = arr.filter(u => String(u.role || '').toUpperCase() === String(role).toUpperCase())
+  }
+
+  return arr
+})
+
+/* edit / save / delete helpers */
 function openEdit(row) {
   editMode.value = true
   Object.assign(form, {
@@ -158,7 +248,6 @@ async function save() {
     await userService.updateUser(form.id, payload)
     Notify.create({ type: 'positive', message: 'Cập nhật thành công' })
     dialog.value = false
-    // update in-place
     const idx = users.value.findIndex((u) => String(u.id) === String(form.id))
     if (idx !== -1) {
       users.value[idx] = { ...users.value[idx], ...payload }
@@ -193,18 +282,14 @@ function confirmDelete(row) {
     cancel: true,
     persistent: true,
   }).onOk(() => {
-    // debug log
-    console.log('[confirmDelete] confirmed id=', row.id)
     doDelete(row.id)
   })
 }
 
 async function doDelete(id) {
-  console.log('[doDelete] start id=', id)
   deletingIds.value.add(String(id))
   try {
-    const res = await userService.deleteUser(id)
-    console.log('[doDelete] response:', res)
+    await userService.deleteUser(id)
     Notify.create({ type: 'positive', message: 'Xóa thành công' })
     users.value = users.value.filter((u) => String(u.id) !== String(id))
   } catch (err) {
@@ -216,6 +301,8 @@ async function doDelete(id) {
   }
 }
 
+
+/* lifecycle */
 onMounted(() => {
   loadUsers()
 })

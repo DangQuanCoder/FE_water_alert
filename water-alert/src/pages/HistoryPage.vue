@@ -1,4 +1,3 @@
-<!-- src/pages/HistoryPage.vue -->
 <template>
   <q-page class="q-pa-md">
     <div class="row q-col-gutter-md">
@@ -29,7 +28,6 @@
               <q-spinner-dots color="primary" size="40px" />
             </div>
 
-            <!-- nếu không có data sau filter -->
             <div
               v-else-if="noChartData"
               class="row items-center justify-center"
@@ -39,13 +37,12 @@
               <div class="text-subtitle1">Không có dữ liệu trong khoảng thời gian đã chọn</div>
             </div>
 
-            <!-- canvas chart -->
             <canvas
               v-else
               ref="historyCanvas"
               width="900"
               height="320"
-              style="max-width: 100%; display: block"
+              style="max-width: 100%; display: block; width:100%; height:320px"
             ></canvas>
           </div>
         </q-card>
@@ -108,13 +105,15 @@ import { Chart, registerables } from 'chart.js'
 import * as waterService from 'src/services/waterService'
 
 Chart.register(...registerables)
+import { ref, onMounted, computed, nextTick } from 'vue'
+
+/* state */
 const levels = ref([])
 const loading = ref(false)
 const historyCanvas = ref(null)
 let chartInstance = null
 const noChartData = ref(false)
 
-// thresholds must be same as other pages (adjust if needed)
 const TH_DANGER = 80 // cm
 
 const filterFrom = ref('')
@@ -130,7 +129,6 @@ const columns = [
 function formatLevel(v) {
   return v == null ? '--' : Number(v).toFixed(0)
 }
-
 function formatTime(ts) {
   if (!ts) return '--'
   return new Date(ts).toLocaleString()
@@ -139,7 +137,7 @@ function formatTime(ts) {
 const rowsCount = computed(() => levels.value.length)
 const dangerCount = computed(() => levels.value.filter((l) => Number(l.level) > TH_DANGER).length)
 
-// chuyển "2025-11-4" hoặc "2025-11-04" thành Date(2025, 10, 4)
+/* parse Y-M-D safely */
 function parseDateSafeYMD(s) {
   if (!s) return null
   const parts = String(s).trim().split('-')
@@ -153,17 +151,15 @@ function parseDateSafeYMD(s) {
 
   return new Date(y, m - 1, d, 0, 0, 0)
 }
-
-// dùng để lọc đến cuối ngày
 function parseDateSafeYMDEnd(s) {
   const d = parseDateSafeYMD(s)
   if (!d) return null
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
 }
 
-// filtered rows by date
+/* filtered rows by date */
 const filteredRows = computed(() => {
-  let arr = levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+  let arr = Array.isArray(levels.value) ? levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) : []
 
   const fFrom = parseDateSafeYMD(filterFrom.value)
   const fTo = parseDateSafeYMDEnd(filterTo.value)
@@ -185,10 +181,7 @@ const filteredRows = computed(() => {
   return arr
 })
 
-import { ref, onMounted, computed, nextTick } from 'vue' // thêm nextTick vào import
-
-// ... phần khác của file ...
-
+/* load data */
 async function loadAll() {
   loading.value = true
   try {
@@ -197,32 +190,63 @@ async function loadAll() {
   } catch (err) {
     console.error('loadAll error', err)
     Notify.create({ type: 'negative', message: 'Không tải được dữ liệu lịch sử' })
-    levels.value = [] // đảm bảo có giá trị an toàn
+    levels.value = []
   } finally {
-    // đảm bảo loading chuyển về false trước khi vẽ chart
     loading.value = false
-
-    // chờ DOM cập nhật (canvas hiện) rồi vẽ chart
     await nextTick()
     renderChart()
   }
 }
 
+/* ---------- AGGREGATION: group by hour on client ---------- */
+/**
+ * group an array of records { timestamp, level } into hours,
+ * return array sorted ascending: [{ hourISO, avg, min, max, count }]
+ */
+function aggregateHourly(records) {
+  // use a Map keyed by 'YYYY-MM-DDTHH' (hour)
+  const m = new Map()
+  for (const r of records) {
+    if (!r || r.timestamp == null) continue
+    const d = new Date(r.timestamp)
+    if (isNaN(d.getTime())) continue
+    // build key: e.g. '2025-11-27T13' (hour precision)
+    const key = d.getFullYear() + '-' +
+                String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getDate()).padStart(2, '0') + 'T' +
+                String(d.getHours()).padStart(2, '0')
+    if (!m.has(key)) m.set(key, [])
+    const lv = Number(r.level)
+    if (!Number.isFinite(lv)) continue
+    m.get(key).push(lv)
+  }
+
+  const out = []
+  for (const [k, arr] of m.entries()) {
+    const sum = arr.reduce((s, x) => s + x, 0)
+    const avg = sum / arr.length
+    const min = Math.min(...arr)
+    const max = Math.max(...arr)
+    // convert 'k' to a full ISO-like string at hour start
+    // e.g. '2025-11-27T13' -> '2025-11-27T13:00:00'
+    const hourISO = k + ':00:00'
+    out.push({ hourISO, avg, min, max, count: arr.length })
+  }
+
+  // sort ascending by hour
+  out.sort((a, b) => new Date(a.hourISO) - new Date(b.hourISO))
+  return out
+}
+
+/* ---------- RENDER CHART ---------- */
 function renderChart() {
   // destroy previous chart safely
   if (chartInstance) {
-    try {
-      chartInstance.destroy()
-    } catch (err) {
-      void err
-    }
+    try { chartInstance.destroy() } catch { /*ignore*/ }
     chartInstance = null
   }
 
-  // source = filteredRows (so default is full dataset when no filter)
-  const source = (Array.isArray(filteredRows.value) ? filteredRows.value : [])
-    .slice()
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+  const source = (Array.isArray(filteredRows.value) ? filteredRows.value : []).slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
 
   if (!source || source.length === 0) {
     noChartData.value = true
@@ -231,54 +255,114 @@ function renderChart() {
     noChartData.value = false
   }
 
-  // ensure canvas element exists
+  // aggregate hourly
+  const hourly = aggregateHourly(source)
+
+  if (!hourly || hourly.length === 0) {
+    noChartData.value = true
+    return
+  }
+
+  // labels only hour label (e.g. '27/11 13:00' or use locale)
+  const labels = hourly.map(h => {
+    const d = new Date(h.hourISO)
+    // show day + hour to avoid confusion across multiple days
+    return d.toLocaleDateString() + ' ' + String(d.getHours()).padStart(2, '0') + ':00'
+  })
+
+  const dataAvg = hourly.map(h => Number(h.avg.toFixed(2)))
+  const dataMin = hourly.map(h => Number(h.min))
+  const dataMax = hourly.map(h => Number(h.max))
+
   const ctxEl = historyCanvas.value
   if (!ctxEl) return
-
-  const labels = source.map((r) => new Date(r.timestamp).toLocaleString())
-  const data = source.map((r) => Number(r.level))
-
-  // small debounce for resize
-  if (typeof Chart !== 'undefined' && Chart.defaults) Chart.defaults.resizeDelay = 200
-
   const ctx = ctxEl.getContext('2d')
+
+  // Create chart with area between min and max and avg line
   chartInstance = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [
+        // max (invisible line, used as upper bound)
         {
-          label: 'Mực nước (cm)',
-          data,
-          fill: true,
+          label: 'max',
+          data: dataMax,
+          borderWidth: 0,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false,
+        },
+        // min (fill to previous -> area between min and max)
+        {
+          label: 'min',
+          data: dataMin,
+          borderWidth: 0,
+          pointRadius: 0,
+          tension: 0.3,
+          // fill to previous dataset (max) -> area between min and max
+          fill: '-1',
+          backgroundColor: 'rgba(54,162,235,0.12)',
+        },
+        // avg line on top
+        {
+          label: 'Mực nước (avg) cm',
+          data: dataAvg,
+          fill: false,
           tension: 0.3,
           borderWidth: 2,
           pointRadius: 3,
-        },
-      ],
+          borderColor: 'rgba(54,162,235,0.9)',
+          backgroundColor: 'rgba(54,162,235,0.2)',
+        }
+      ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      resizeDelay: 200,
-      scales: { x: { ticks: { maxRotation: 45 } } },
-      plugins: { legend: { display: false } },
-    },
+      scales: {
+        x: {
+          ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 12 }
+        },
+        y: {
+          beginAtZero: true
+        }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            // show min/max/avg in tooltip for index
+            label: function(context) {
+              const idx = context.dataIndex
+              const dsLabel = context.dataset.label || ''
+              if (dsLabel.includes('avg')) {
+                return `avg: ${dataAvg[idx]} cm`
+              } else if (dsLabel === 'min') {
+                return `min: ${dataMin[idx]} cm`
+              } else if (dsLabel === 'max') {
+                return `max: ${dataMax[idx]} cm`
+              }
+              return `${dsLabel}: ${context.formattedValue}`
+            }
+          }
+        }
+      }
+    }
   })
 }
 
+/* UI actions */
 function applyDateFilter() {
-  // filteredRows là computed, nhưng ta cần vẽ lại biểu đồ theo filter mới
+  // computed filteredRows will change; re-render chart
   renderChart()
 }
-
 function clearDateFilter() {
   filterFrom.value = ''
   filterTo.value = ''
-  // vẽ lại biểu đồ cho toàn bộ dữ liệu
   renderChart()
 }
-
+const gotoId = ref('')
 function gotoRecord() {
   const id = Number(gotoId.value)
   if (!id) return
@@ -287,12 +371,10 @@ function gotoRecord() {
     Notify.create({ type: 'warning', message: 'Không tìm thấy bản ghi id=' + id })
     return
   }
-  // scroll or highlight — here we just show popup notify
-  Notify.create({ type: 'positive', message: `Found id=${id} level=${formatLevel(found.level)} m` })
+  Notify.create({ type: 'positive', message: `Found id=${id} level=${formatLevel(found.level)} cm` })
 }
 
-const gotoId = ref('')
-
+/* lifecycle */
 onMounted(() => {
   loadAll()
 })
