@@ -6,12 +6,25 @@
           <div class="row items-center justify-between">
             <div class="text-h6">Lịch sử mực nước</div>
             <div>
-              <q-btn dense flat round icon="refresh" @click="loadAll" title="Làm mới" />
+              <q-btn dense flat round icon="refresh" @click="reloadAll" title="Làm mới" />
             </div>
           </div>
 
+          <!-- device select + date filters -->
           <div class="row q-mt-md items-center">
-            <q-input dense v-model="filterFrom" type="date" label="Từ ngày (YYYY-MM-DD)" />
+            <q-select
+              dense
+              v-model="selectedDevice"
+              :options="deviceOptions"
+              option-label="displayLabel"
+              option-value="id"
+              label="Chọn thiết bị (All = Tất cả)"
+              clearable
+              class="col-12 col-md-4"
+              @update:model-value="onDeviceChange"
+            />
+
+            <q-input dense v-model="filterFrom" type="date" label="Từ ngày (YYYY-MM-DD)" class="q-ml-sm" />
             <q-input
               dense
               v-model="filterTo"
@@ -19,6 +32,7 @@
               label="Đến ngày (YYYY-MM-DD)"
               class="q-ml-sm"
             />
+
             <q-btn color="primary" class="q-ml-sm" label="Áp dụng" @click="applyDateFilter" />
             <q-btn flat class="q-ml-sm" label="Xóa filter" @click="clearDateFilter" />
           </div>
@@ -103,6 +117,7 @@
 import { Notify } from 'quasar'
 import { Chart, registerables } from 'chart.js'
 import * as waterService from 'src/services/waterService'
+import * as deviceService from 'src/services/deviceService'
 
 Chart.register(...registerables)
 import { ref, onMounted, computed, nextTick } from 'vue'
@@ -157,6 +172,30 @@ function parseDateSafeYMDEnd(s) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
 }
 
+/* device selector */
+const deviceOptions = ref([]) // normalized: [{ id, displayLabel, raw }]
+const selectedDevice = ref(null)
+
+function normalizeDevice(d) {
+  // try to create a friendly label, adjust fields as your device object uses
+  const id = d.id ?? d.deviceId ?? d._id ?? null
+  const name = d.name ?? d.deviceName ?? ('Device ' + (id ?? ''))
+  const label = `${name} (${id})`
+  return { id, displayLabel: label, raw: d }
+}
+
+/* load devices */
+async function loadDevices() {
+  try {
+    const list = await deviceService.getAllDevices()
+    const arr = Array.isArray(list) ? list : (list?.devices ?? list) ?? []
+    deviceOptions.value = arr.map(normalizeDevice)
+  } catch (err) {
+    console.error('loadDevices error', err)
+    deviceOptions.value = []
+  }
+}
+
 /* filtered rows by date */
 const filteredRows = computed(() => {
   let arr = Array.isArray(levels.value) ? levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) : []
@@ -178,18 +217,48 @@ const filteredRows = computed(() => {
     })
   }
 
+  // if selectedDevice is set and records contain deviceId property, filter client-side
+  if (selectedDevice.value) {
+    arr = arr.filter((r) => {
+      // check common property names for device id
+      const did = r.deviceId ?? r.device_id ?? r.device ?? r.deviceIdRef ?? r.deviceRef
+      if (did == null) return false
+      return String(did) === String(selectedDevice.value)
+    })
+  }
+
   return arr
 })
 
-/* load data */
-async function loadAll() {
+/* load history for selected device (prefer server-side) */
+async function loadHistoryForDevice() {
   loading.value = true
   try {
-    const res = await waterService.getAllLevels()
-    levels.value = Array.isArray(res) ? res : res || []
+    const fromISO = filterFrom.value ? new Date(filterFrom.value).toISOString() : undefined
+    const toISO = filterTo.value ? new Date(parseDateSafeYMDEnd(filterTo.value)).toISOString() : undefined
+
+    let arr = []
+    if (selectedDevice.value) {
+      // try server-side endpoint first (getLevelsByDevice should exist)
+      try {
+        const res = await waterService.getLevelsByDevice(selectedDevice.value, fromISO, toISO)
+        arr = Array.isArray(res) ? res : res?.data ?? []
+      } catch (err) {
+        // fallback to getting all and filter client-side
+        console.warn('server-side device history failed, falling back to client filter', err)
+        const all = await waterService.getAllLevels()
+        arr = Array.isArray(all) ? all : []
+      }
+    } else {
+      // no device selected => load all
+      const all = await waterService.getAllLevels()
+      arr = Array.isArray(all) ? all : []
+    }
+
+    levels.value = arr
   } catch (err) {
-    console.error('loadAll error', err)
-    Notify.create({ type: 'negative', message: 'Không tải được dữ liệu lịch sử' })
+    console.error('loadHistoryForDevice error', err)
+    Notify.create({ type: 'negative', message: 'Không tải được dữ liệu lịch sử theo thiết bị' })
     levels.value = []
   } finally {
     loading.value = false
@@ -198,19 +267,29 @@ async function loadAll() {
   }
 }
 
+/* helper: reload both devices + data */
+async function reloadAll() {
+  await loadDevices()
+  await loadHistoryForDevice()
+}
+
+/* when device changes */
+function onDeviceChange() {
+  // reload data for selected device
+  loadHistoryForDevice()
+}
+
 /* ---------- AGGREGATION: group by hour on client ---------- */
 /**
  * group an array of records { timestamp, level } into hours,
  * return array sorted ascending: [{ hourISO, avg, min, max, count }]
  */
 function aggregateHourly(records) {
-  // use a Map keyed by 'YYYY-MM-DDTHH' (hour)
   const m = new Map()
   for (const r of records) {
     if (!r || r.timestamp == null) continue
     const d = new Date(r.timestamp)
     if (isNaN(d.getTime())) continue
-    // build key: e.g. '2025-11-27T13' (hour precision)
     const key = d.getFullYear() + '-' +
                 String(d.getMonth() + 1).padStart(2, '0') + '-' +
                 String(d.getDate()).padStart(2, '0') + 'T' +
@@ -227,20 +306,16 @@ function aggregateHourly(records) {
     const avg = sum / arr.length
     const min = Math.min(...arr)
     const max = Math.max(...arr)
-    // convert 'k' to a full ISO-like string at hour start
-    // e.g. '2025-11-27T13' -> '2025-11-27T13:00:00'
     const hourISO = k + ':00:00'
     out.push({ hourISO, avg, min, max, count: arr.length })
   }
 
-  // sort ascending by hour
   out.sort((a, b) => new Date(a.hourISO) - new Date(b.hourISO))
   return out
 }
 
 /* ---------- RENDER CHART ---------- */
 function renderChart() {
-  // destroy previous chart safely
   if (chartInstance) {
     try { chartInstance.destroy() } catch { /*ignore*/ }
     chartInstance = null
@@ -255,7 +330,6 @@ function renderChart() {
     noChartData.value = false
   }
 
-  // aggregate hourly
   const hourly = aggregateHourly(source)
 
   if (!hourly || hourly.length === 0) {
@@ -263,10 +337,8 @@ function renderChart() {
     return
   }
 
-  // labels only hour label (e.g. '27/11 13:00' or use locale)
   const labels = hourly.map(h => {
     const d = new Date(h.hourISO)
-    // show day + hour to avoid confusion across multiple days
     return d.toLocaleDateString() + ' ' + String(d.getHours()).padStart(2, '0') + ':00'
   })
 
@@ -278,71 +350,30 @@ function renderChart() {
   if (!ctxEl) return
   const ctx = ctxEl.getContext('2d')
 
-  // Create chart with area between min and max and avg line
   chartInstance = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [
-        // max (invisible line, used as upper bound)
-        {
-          label: 'max',
-          data: dataMax,
-          borderWidth: 0,
-          pointRadius: 0,
-          tension: 0.3,
-          fill: false,
-        },
-        // min (fill to previous -> area between min and max)
-        {
-          label: 'min',
-          data: dataMin,
-          borderWidth: 0,
-          pointRadius: 0,
-          tension: 0.3,
-          // fill to previous dataset (max) -> area between min and max
-          fill: '-1',
-          backgroundColor: 'rgba(54,162,235,0.12)',
-        },
-        // avg line on top
-        {
-          label: 'Mực nước (avg) cm',
-          data: dataAvg,
-          fill: false,
-          tension: 0.3,
-          borderWidth: 2,
-          pointRadius: 3,
-          borderColor: 'rgba(54,162,235,0.9)',
-          backgroundColor: 'rgba(54,162,235,0.2)',
-        }
+        { label: 'max', data: dataMax, borderWidth: 0, pointRadius: 0, tension: 0.3, fill: false },
+        { label: 'min', data: dataMin, borderWidth: 0, pointRadius: 0, tension: 0.3, fill: '-1', backgroundColor: 'rgba(54,162,235,0.12)' },
+        { label: 'Mực nước (avg) cm', data: dataAvg, fill: false, tension: 0.3, borderWidth: 2, pointRadius: 3, borderColor: 'rgba(54,162,235,0.9)', backgroundColor: 'rgba(54,162,235,0.2)' }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: {
-        x: {
-          ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 12 }
-        },
-        y: {
-          beginAtZero: true
-        }
-      },
+      scales: { x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 12 } }, y: { beginAtZero: true } },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            // show min/max/avg in tooltip for index
             label: function(context) {
               const idx = context.dataIndex
               const dsLabel = context.dataset.label || ''
-              if (dsLabel.includes('avg')) {
-                return `avg: ${dataAvg[idx]} cm`
-              } else if (dsLabel === 'min') {
-                return `min: ${dataMin[idx]} cm`
-              } else if (dsLabel === 'max') {
-                return `max: ${dataMax[idx]} cm`
-              }
+              if (dsLabel.includes('avg')) return `avg: ${dataAvg[idx]} cm`
+              if (dsLabel === 'min') return `min: ${dataMin[idx]} cm`
+              if (dsLabel === 'max') return `max: ${dataMax[idx]} cm`
               return `${dsLabel}: ${context.formattedValue}`
             }
           }
@@ -354,13 +385,12 @@ function renderChart() {
 
 /* UI actions */
 function applyDateFilter() {
-  // computed filteredRows will change; re-render chart
-  renderChart()
+  loadHistoryForDevice()
 }
 function clearDateFilter() {
   filterFrom.value = ''
   filterTo.value = ''
-  renderChart()
+  loadHistoryForDevice()
 }
 const gotoId = ref('')
 function gotoRecord() {
@@ -376,7 +406,9 @@ function gotoRecord() {
 
 /* lifecycle */
 onMounted(() => {
-  loadAll()
+  // load devices + initial data
+  loadDevices()
+  loadHistoryForDevice()
 })
 </script>
 
