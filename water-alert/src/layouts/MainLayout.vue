@@ -7,11 +7,30 @@
         <q-toolbar-title>Water Alert</q-toolbar-title>
 
         <div class="row items-center q-gutter-sm">
-          <div v-if="auth.phone" class="text-subtitle2 q-mr-sm">
+          <!-- If logged in show phone + role and logout -->
+          <div v-if="isLoggedIn" class="text-subtitle2 q-mr-sm">
             {{ auth.phone }} <span class="text-caption text-grey-6">({{ auth.role }})</span>
           </div>
 
-          <q-btn flat round dense icon="logout" label="Đăng xuất" @click="onLogout" />
+          <q-btn
+            v-if="!isLoggedIn"
+            flat
+            dense
+            round
+            icon="login"
+            label="Đăng nhập"
+            @click="goLogin"
+          />
+
+          <q-btn
+            v-else
+            flat
+            dense
+            round
+            icon="logout"
+            label="Đăng xuất"
+            @click="onLogout"
+          />
         </div>
       </q-toolbar>
     </q-header>
@@ -23,7 +42,8 @@
           <q-item-section>Trang chủ</q-item-section>
         </q-item>
 
-        <q-item clickable v-ripple to="/user">
+        <!-- show User menu only when logged in -->
+        <q-item clickable v-ripple to="/user" v-if="isLoggedIn">
           <q-item-section avatar><q-icon name="person" /></q-item-section>
           <q-item-section>User</q-item-section>
         </q-item>
@@ -47,7 +67,6 @@
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
           <q-item-section>Quản lý thiết bị</q-item-section>
         </q-item>
-
       </q-list>
     </q-drawer>
 
@@ -67,11 +86,19 @@ const leftDrawerOpen = ref(false)
 const router = useRouter()
 const auth = useAuthStore()
 
-const isAdmin = computed(() => (auth.role || '').toString().toLowerCase() === 'admin')
+// consider logged in when token exists (safer than phone)
+const isLoggedIn = computed(() => !!(auth.token))
+
+// admin if role equals 'admin' (case-insensitive) and user is logged in
+const isAdmin = computed(() => isLoggedIn.value && (String(auth.role || '').toLowerCase() === 'admin'))
 
 function onLogout() {
   auth.logout()
   Notify.create({ type: 'positive', message: 'Đăng xuất thành công' })
+  router.push({ path: '/login' })
+}
+
+function goLogin() {
   router.push({ path: '/login' })
 }
 </script>
