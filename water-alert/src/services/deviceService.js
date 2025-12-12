@@ -32,3 +32,10 @@ export async function patchDeviceLocation(id, payload) {
   const res = await api.patch(`/api/admin/devices/${id}/location`, payload)
   return res.data
 }
+
+// src/services/deviceService.js
+export async function getAllDevicesForUser() {
+  const res = await api.get('/api/devices') // user-facing endpoint
+  return res.data
+}
+

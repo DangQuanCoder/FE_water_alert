@@ -25,7 +25,15 @@ const routes = [
       { path: 'admin/areas', component: () => import('pages/AdminAreasPage.vue'), meta: { role: ['admin'] } },
 
       // User pages
-      { path: 'user', component: () => import('pages/UserPage.vue'), meta: { role: ['user', 'admin'] } }
+      { path: 'user', component: () => import('pages/UserPage.vue'), meta: { role: ['user', 'admin'] } },
+
+      { path: 'forgot-password', component: () => import('pages/ForgotPasswordPage.vue') },
+      { path: 'reset-password', component: () => import('pages/ResetPasswordPage.vue') },
+      {
+        path: 'subscriptions',
+        component: () => import('pages/SubscriptionsPage.vue'),
+        meta: { role: ['user', 'admin'] }
+      },
     ]
   },
 

@@ -13,6 +13,7 @@
           <div class="row items-center q-gutter-sm q-mt-md">
             <q-btn type="submit" label="ĐĂNG NHẬP" color="primary" />
             <q-btn flat label="ĐĂNG KÝ" to="/register" />
+            <q-btn flat label="Quên mật khẩu?" @click="goForgot" />
           </div>
         </q-form>
       </q-card-section>
@@ -50,4 +51,9 @@ async function onLogin () {
     Notify.create({ type: 'negative', message: 'Lỗi hệ thống. Kiểm tra Console.' })
   }
 }
+
+function goForgot() {
+  router.push('/forgot-password')
+}
+
 </script>

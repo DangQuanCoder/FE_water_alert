@@ -67,6 +67,17 @@
           <q-item-section avatar><q-icon name="devices" /></q-item-section>
           <q-item-section>Quản lý thiết bị</q-item-section>
         </q-item>
+
+        <q-item v-if="isLoggedIn" clickable to="/subscriptions">
+          <q-item-section avatar>
+            <q-icon name="notifications" />
+          </q-item-section>
+          <q-item-section>
+            Quản lý đăng ký thiết bị
+          </q-item-section>
+        </q-item>
+
+
       </q-list>
     </q-drawer>
 

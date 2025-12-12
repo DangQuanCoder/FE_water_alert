@@ -260,12 +260,11 @@ function addMarkersFromLevels(data) {
 
     const color = statusColorFor(item.level)
     // use circleMarker (fixed pixel radius) to show device point clearly
-    const marker = L.circleMarker([lat, lng], {
+    const marker = L.circle([lat, lng], {
       color,
       fillColor: color,
-      fillOpacity: 0.9,
-      radius: 8,
-      weight: 1
+      fillOpacity: 0.35,
+      radius: 500   // vùng ngập 500m quanh cảm biến
     }).addTo(map.value)
 
     const popupContent = `
