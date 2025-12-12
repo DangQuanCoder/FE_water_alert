@@ -13,16 +13,19 @@
           <!-- device select + date filters -->
           <div class="row q-mt-md items-center">
             <q-select
-              dense
-              v-model="selectedDevice"
-              :options="deviceOptions"
-              option-label="displayLabel"
-              option-value="id"
-              label="Chọn thiết bị (All = Tất cả)"
-              clearable
-              class="col-12 col-md-4"
-              @update:model-value="onDeviceChange"
-            />
+            dense
+            outlined
+            v-model="selectedDevice"
+            :options="deviceOptions"
+            option-label="displayLabel"
+            option-value="id"
+            emit-value
+            map-options
+            label="Chọn thiết bị (All = Tất cả)"
+            clearable
+            class="col-12 col-md-4"
+            @update:model-value="onDeviceChange"
+          />
 
             <q-input dense v-model="filterFrom" type="date" label="Từ ngày (YYYY-MM-DD)" class="q-ml-sm" />
             <q-input
@@ -176,25 +179,69 @@ function parseDateSafeYMDEnd(s) {
 const deviceOptions = ref([]) // normalized: [{ id, displayLabel, raw }]
 const selectedDevice = ref(null)
 
-function normalizeDevice(d) {
-  // try to create a friendly label, adjust fields as your device object uses
-  const id = d.id ?? d.deviceId ?? d._id ?? null
-  const name = d.name ?? d.deviceName ?? ('Device ' + (id ?? ''))
-  const label = `${name} (${id})`
-  return { id, displayLabel: label, raw: d }
-}
+
 
 /* load devices */
+/* Sửa đoạn này trong <script setup> */
+
+/* load devices: Ưu tiên lấy từ API Admin, nếu lỗi (do không quyền) thì trích xuất từ dữ liệu mực nước */
+/* Sửa đoạn code này trong <script setup> của HistoryPage.vue */
+
+// Hàm loadDevices mới: Vừa thử gọi API, vừa biết tự tìm trong dữ liệu lịch sử
 async function loadDevices() {
+  // CÁCH 1: Thử gọi API Admin (chỉ thành công nếu bạn là Admin)
   try {
     const list = await deviceService.getAllDevices()
     const arr = Array.isArray(list) ? list : (list?.devices ?? list) ?? []
-    deviceOptions.value = arr.map(normalizeDevice)
+
+    if (arr.length > 0) {
+       // Lưu ý: Ta map id thành d.deviceId (chuỗi) để khớp với dữ liệu mực nước
+       deviceOptions.value = arr.map(d => ({
+        id: d.deviceId,
+        displayLabel: `${d.name} (${d.deviceId})`,
+        raw: d
+      }))
+      return; // Nếu lấy được từ API thì xong luôn, return.
+    }
   } catch (err) {
-    console.error('loadDevices error', err)
-    deviceOptions.value = []
+    console.warn('Không gọi được API Admin, chuyển sang trích xuất từ lịch sử.', err)
   }
+
+  // CÁCH 2: Trích xuất từ dữ liệu lịch sử (Fallback)
+  // Nếu chưa có dữ liệu levels thì phải tải về trước
+  if (levels.value.length === 0) {
+     try {
+       const all = await waterService.getAllLevels()
+       levels.value = Array.isArray(all) ? all : []
+     } catch {
+       return
+     }
+  }
+
+  // Lọc lấy các deviceId duy nhất từ mảng dữ liệu
+  const uniqueDeviceIds = [...new Set(levels.value.map(r => r.deviceId).filter(Boolean))]
+
+  // Tạo danh sách cho Dropdown
+  deviceOptions.value = uniqueDeviceIds.map(deviceId => ({
+    id: deviceId, // Giá trị dùng để lọc
+    displayLabel: `Thiết bị ${deviceId}`, // Vì không biết tên thật, hiển thị tạm ID
+    raw: { deviceId }
+  }))
 }
+
+/* Sửa lại onMounted để đảm bảo thứ tự chạy đúng */
+onMounted(async () => {
+  loading.value = true
+  try {
+    // 1. Quan trọng: Tải dữ liệu lịch sử TRƯỚC
+    await loadHistoryForDevice()
+
+    // 2. Sau đó mới chạy hàm tìm thiết bị (để nó có dữ liệu mà trích xuất)
+    await loadDevices()
+  } finally {
+    loading.value = false
+  }
+})
 
 /* filtered rows by date */
 const filteredRows = computed(() => {
