@@ -111,25 +111,41 @@ function close() {
   openLocal.value = false
 }
 
+/* Thay thế hàm submit cũ trong DeviceForm.vue */
+
 async function submit() {
   saving.value = true
+
+  // 1. Xử lý tọa độ: Chuyển dấu phẩy (,) thành dấu chấm (.) để tránh lỗi Backend
+  let safeLat = model.latitude;
+  let safeLng = model.longitude;
+
+  if (typeof safeLat === 'string') safeLat = safeLat.replace(',', '.');
+  if (typeof safeLng === 'string') safeLng = safeLng.replace(',', '.');
+
+  // Chuyển về số (hoặc null nếu rỗng)
+  safeLat = safeLat ? Number(safeLat) : null;
+  safeLng = safeLng ? Number(safeLng) : null;
+
   try {
     if (isEdit.value) {
-      // cập nhật: gửi payload tương ứng (lưu ý: internal keys giữ nguyên)
+      // 2. KHI SỬA: Phải gửi kèm cả deviceId (vì Backend yêu cầu @NotBlank)
       await deviceService.updateDevice(props.editingDevice.id, {
+        deviceId: model.deviceId, // <--- QUAN TRỌNG: Thêm dòng này
         name: model.name,
         areaId: model.areaId,
-        latitude: model.latitude,
-        longitude: model.longitude
+        latitude: safeLat,        // Dùng biến đã xử lý
+        longitude: safeLng        // Dùng biến đã xử lý
       })
       Notify.create({ type: 'positive', message: 'Cập nhật thiết bị thành công' })
     } else {
+      // KHI THÊM MỚI
       await deviceService.createDevice({
         deviceId: model.deviceId,
         name: model.name,
         areaId: model.areaId,
-        latitude: model.latitude,
-        longitude: model.longitude
+        latitude: safeLat,
+        longitude: safeLng
       })
       Notify.create({ type: 'positive', message: 'Tạo thiết bị thành công' })
     }
@@ -137,7 +153,8 @@ async function submit() {
     close()
   } catch (err) {
     console.error(err)
-    const msg = err?.response?.data || 'Lỗi khi lưu thiết bị'
+    // Hiển thị lỗi chi tiết từ Server
+    const msg = err?.response?.data?.message || err?.response?.data || 'Lỗi khi lưu thiết bị'
     Notify.create({ type: 'negative', message: String(msg) })
   } finally {
     saving.value = false
