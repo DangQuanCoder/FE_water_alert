@@ -22,6 +22,6 @@ export async function getMe() {
  */
 export async function updateMe(payload) {
   // prefer to return res.data or throw so caller sees error
-  const res = await api.put('/api/users/me', payload)
+  const res = await api.put('/api/user/me', payload)
   return res.data
 }

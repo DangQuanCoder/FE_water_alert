@@ -119,6 +119,13 @@
 
         <q-card-section>
           <q-form @submit.prevent="saveProfile" class="q-gutter-md">
+            <q-input
+              v-model="profile.username"
+              label="Tên đăng nhập (Username)"
+              readonly
+              filled
+              hint="Không thể thay đổi tên đăng nhập"
+            />
             <q-input v-model="profile.fullName" label="Họ và tên" />
             <q-input v-model="profile.email" type="email" label="Email" />
             <q-input v-model="profile.phone" label="Số điện thoại" />
@@ -156,6 +163,8 @@ let chartInstance = null
 const profileDialog = ref(false)
 const profileSaving = ref(false)
 const profile = reactive({
+  id: null,
+  username: '',
   fullName: '',
   email: '',
   phone: '',
@@ -229,7 +238,8 @@ function renderChart() {
 /* --- Profile editing logic --- */
 async function openEditProfile() {
   profileSaving.value = false
-
+  profile.id = null
+  profile.username = ''
   profile.fullName = ''
   profile.email = ''
   profile.phone = auth.phone || ''
@@ -237,14 +247,16 @@ async function openEditProfile() {
   const server = await userService.getMe()
 
   if (server) {
+    profile.id = server.id
+    profile.username = server.username || ''
     profile.fullName = server.fullName ?? server.name ?? ''
     profile.email = server.email ?? ''
     profile.phone = server.phone ?? auth.phone
   } else {
-    const found = usersStore.users.find(u =>
-      String(u.phone) === String(auth.phone)
-    )
+    const found = usersStore.users.find(u => String(u.phone) === String(auth.phone))
     if (found) {
+      profile.id = found.id
+      profile.username = found.username || ''
       profile.fullName = found.fullName ?? found.name ?? ''
       profile.email = found.email ?? ''
       profile.phone = found.phone ?? profile.phone
@@ -265,37 +277,57 @@ function cancelEditProfile() {
  *  - if success update auth store and (if using mock users store) update that as well
  */
 async function saveProfile() {
+  // Validate sơ bộ ở Frontend
+  if (!profile.fullName || !profile.fullName.trim()) {
+    Notify.create({ type: 'warning', message: 'Họ và tên không được để trống' })
+    return
+  }
+  if (!profile.phone || !profile.phone.trim()) {
+    Notify.create({ type: 'warning', message: 'Số điện thoại không được để trống' })
+    return
+  }
+  // Nếu username bị rỗng (do lỗi data cũ), hãy báo lỗi hoặc tự sinh
+  if (!profile.username) {
+     // Trường hợp hiếm: User cũ chưa có username, ta có thể tạm lấy số điện thoại làm username
+     profile.username = profile.phone
+  }
+
   profileSaving.value = true
   try {
+    // QUAN TRỌNG: Backend yêu cầu phải có đủ username, fullName, phone (không được null)
     const payload = {
-      fullName: profile.fullName || undefined,
-      email: profile.email || undefined,
-      phone: profile.phone || undefined
+      username: profile.username, // Gửi lại chính username cũ
+      fullName: profile.fullName,
+      phone: profile.phone,
+      email: profile.email || null // Email có thể null
     }
 
     const updated = await userService.updateMe(payload)
 
     if (updated) {
+      // Cập nhật lại Store Auth
       try {
         const newPhone = updated.phone ?? auth.phone
         const newRole = updated.role ?? auth.role
         const currentToken = auth.token
         auth.setAuth({ token: currentToken, role: newRole, phone: newPhone })
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
 
+      // Cập nhật lại Store Users (nếu dùng)
       try {
-        if (updated.id) {
-          usersStore.updateUser(updated.id, {
+        // Cập nhật lại cả biến profile để hiển thị ngay lập tức
+        profile.fullName = updated.fullName
+        profile.email = updated.email
+
+        if (updated.id || profile.id) {
+          usersStore.updateUser(updated.id || profile.id, {
             fullName: updated.fullName,
             email: updated.email,
-            phone: updated.phone
+            phone: updated.phone,
+            username: updated.username
           })
         }
-      } catch {
-      // ignore
-}
+      } catch { /* ignore */ }
 
 
       Notify.create({ type: 'positive', message: 'Cập nhật hồ sơ thành công' })
@@ -309,10 +341,6 @@ async function saveProfile() {
     profileSaving.value = false
   }
 }
-
-
-
-/* lifecycle */
 onMounted(() => {
   loadLevels()
 })
