@@ -10,7 +10,6 @@
             </div>
           </div>
 
-          <!-- device select + date filters -->
           <div class="row q-mt-md items-center">
             <q-select
             dense
@@ -51,7 +50,7 @@
               style="min-height: 300px"
             >
               <q-icon name="warning" color="warning" size="32px" class="q-mr-sm" />
-              <div class="text-subtitle1">Không có dữ liệu trong khoảng thời gian đã chọn</div>
+              <div class="text-subtitle1">Không có dữ liệu (hoặc toàn bộ là 0) trong khoảng này</div>
             </div>
 
             <canvas
@@ -65,7 +64,7 @@
         </q-card>
 
         <q-card class="q-pa-md q-mt-md">
-          <div class="text-subtitle1">Danh sách bản ghi</div>
+          <div class="text-subtitle1">Danh sách bản ghi (Bao gồm cả giá trị 0)</div>
           <q-table
             :rows="filteredRows"
             :columns="columns"
@@ -119,24 +118,27 @@
 <script setup>
 import { Notify } from 'quasar'
 import { Chart, registerables } from 'chart.js'
+import zoomPlugin from 'chartjs-plugin-zoom'
 import * as waterService from 'src/services/waterService'
 import * as deviceService from 'src/services/deviceService'
 
-Chart.register(...registerables)
+Chart.register(...registerables, zoomPlugin)
+
 import { ref, onMounted, computed, nextTick } from 'vue'
 
-/* state */
+/* --- STATE --- */
 const levels = ref([])
 const loading = ref(false)
 const historyCanvas = ref(null)
 let chartInstance = null
 const noChartData = ref(false)
 
-const TH_DANGER = 80 // cm
-
+const TH_DANGER = 80
 const filterFrom = ref('')
 const filterTo = ref('')
-const pagination = ref({ page: 1, rowsPerPage: 10 })
+
+// Cache dữ liệu (chỉ cần 1 biến vì ta luôn dùng gộp 3 phút)
+let cachedData = []
 
 const columns = [
   { name: 'id', label: 'ID', field: 'id', sortable: true },
@@ -144,30 +146,18 @@ const columns = [
   { name: 'timestamp', label: 'Thời gian', field: 'timestamp', sortable: true },
 ]
 
-function formatLevel(v) {
-  return v == null ? '--' : Number(v).toFixed(0)
-}
-function formatTime(ts) {
-  if (!ts) return '--'
-  return new Date(ts).toLocaleString()
-}
+function formatLevel(v) { return v == null ? '--' : Number(v).toFixed(0) }
+function formatTime(ts) { if (!ts) return '--'; return new Date(ts).toLocaleString() }
 
 const rowsCount = computed(() => levels.value.length)
 const dangerCount = computed(() => levels.value.filter((l) => Number(l.level) > TH_DANGER).length)
 
-/* parse Y-M-D safely */
+// --- Helper Filters ---
 function parseDateSafeYMD(s) {
   if (!s) return null
   const parts = String(s).trim().split('-')
   if (parts.length < 3) return null
-
-  const y = parseInt(parts[0], 10)
-  const m = parseInt(parts[1], 10)
-  const d = parseInt(parts[2], 10)
-
-  if (Number.isNaN(y) || Number.isNaN(m) || Number.isNaN(d)) return null
-
-  return new Date(y, m - 1, d, 0, 0, 0)
+  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
 }
 function parseDateSafeYMDEnd(s) {
   const d = parseDateSafeYMD(s)
@@ -175,255 +165,220 @@ function parseDateSafeYMDEnd(s) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
 }
 
-/* device selector */
-const deviceOptions = ref([]) // normalized: [{ id, displayLabel, raw }]
+/* --- LOAD DATA LOGIC --- */
+const deviceOptions = ref([])
 const selectedDevice = ref(null)
 
-
-
-/* load devices */
-/* Sửa đoạn này trong <script setup> */
-
-/* load devices: Ưu tiên lấy từ API Admin, nếu lỗi (do không quyền) thì trích xuất từ dữ liệu mực nước */
-/* Sửa đoạn code này trong <script setup> của HistoryPage.vue */
-
-// Hàm loadDevices mới: Vừa thử gọi API, vừa biết tự tìm trong dữ liệu lịch sử
 async function loadDevices() {
-  // CÁCH 1: Thử gọi API Admin (chỉ thành công nếu bạn là Admin)
   try {
     const list = await deviceService.getAllDevices()
     const arr = Array.isArray(list) ? list : (list?.devices ?? list) ?? []
-
     if (arr.length > 0) {
-       // Lưu ý: Ta map id thành d.deviceId (chuỗi) để khớp với dữ liệu mực nước
        deviceOptions.value = arr.map(d => ({
-        id: d.deviceId,
-        displayLabel: `${d.name} (${d.deviceId})`,
-        raw: d
+        id: d.deviceId, displayLabel: `${d.name} (${d.deviceId})`
       }))
-      return; // Nếu lấy được từ API thì xong luôn, return.
+      return;
     }
-  } catch (err) {
-    console.warn('Không gọi được API Admin, chuyển sang trích xuất từ lịch sử.', err)
+  } catch {
+    // ignore
   }
-
-  // CÁCH 2: Trích xuất từ dữ liệu lịch sử (Fallback)
-  // Nếu chưa có dữ liệu levels thì phải tải về trước
+  // Fallback
   if (levels.value.length === 0) {
      try {
        const all = await waterService.getAllLevels()
        levels.value = Array.isArray(all) ? all : []
-     } catch {
-       return
-     }
+     } catch { return }
   }
-
-  // Lọc lấy các deviceId duy nhất từ mảng dữ liệu
   const uniqueDeviceIds = [...new Set(levels.value.map(r => r.deviceId).filter(Boolean))]
-
-  // Tạo danh sách cho Dropdown
   deviceOptions.value = uniqueDeviceIds.map(deviceId => ({
-    id: deviceId, // Giá trị dùng để lọc
-    displayLabel: `Thiết bị ${deviceId}`, // Vì không biết tên thật, hiển thị tạm ID
-    raw: { deviceId }
+    id: deviceId, displayLabel: `Thiết bị ${deviceId}`
   }))
 }
 
-/* Sửa lại onMounted để đảm bảo thứ tự chạy đúng */
-onMounted(async () => {
-  loading.value = true
-  try {
-    // 1. Quan trọng: Tải dữ liệu lịch sử TRƯỚC
-    await loadHistoryForDevice()
-
-    // 2. Sau đó mới chạy hàm tìm thiết bị (để nó có dữ liệu mà trích xuất)
-    await loadDevices()
-  } finally {
-    loading.value = false
-  }
-})
-
-/* filtered rows by date */
 const filteredRows = computed(() => {
   let arr = Array.isArray(levels.value) ? levels.value.slice().sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) : []
-
   const fFrom = parseDateSafeYMD(filterFrom.value)
   const fTo = parseDateSafeYMDEnd(filterTo.value)
-
-  if (fFrom) {
-    arr = arr.filter((r) => {
-      const t = new Date(r.timestamp)
-      return t >= fFrom
-    })
-  }
-
-  if (fTo) {
-    arr = arr.filter((r) => {
-      const t = new Date(r.timestamp)
-      return t <= fTo
-    })
-  }
-
-  // if selectedDevice is set and records contain deviceId property, filter client-side
-  if (selectedDevice.value) {
-    arr = arr.filter((r) => {
-      // check common property names for device id
-      const did = r.deviceId ?? r.device_id ?? r.device ?? r.deviceIdRef ?? r.deviceRef
-      if (did == null) return false
-      return String(did) === String(selectedDevice.value)
-    })
-  }
-
+  if (fFrom) arr = arr.filter((r) => new Date(r.timestamp) >= fFrom)
+  if (fTo) arr = arr.filter((r) => new Date(r.timestamp) <= fTo)
   return arr
 })
 
-/* load history for selected device (prefer server-side) */
 async function loadHistoryForDevice() {
   loading.value = true
   try {
     const fromISO = filterFrom.value ? new Date(filterFrom.value).toISOString() : undefined
     const toISO = filterTo.value ? new Date(parseDateSafeYMDEnd(filterTo.value)).toISOString() : undefined
-
     let arr = []
     if (selectedDevice.value) {
-      // try server-side endpoint first (getLevelsByDevice should exist)
       try {
         const res = await waterService.getLevelsByDevice(selectedDevice.value, fromISO, toISO)
         arr = Array.isArray(res) ? res : res?.data ?? []
-      } catch (err) {
-        // fallback to getting all and filter client-side
-        console.warn('server-side device history failed, falling back to client filter', err)
+      } catch {
         const all = await waterService.getAllLevels()
         arr = Array.isArray(all) ? all : []
       }
     } else {
-      // no device selected => load all
       const all = await waterService.getAllLevels()
       arr = Array.isArray(all) ? all : []
     }
-
     levels.value = arr
-  } catch (err) {
-    console.error('loadHistoryForDevice error', err)
-    Notify.create({ type: 'negative', message: 'Không tải được dữ liệu lịch sử theo thiết bị' })
+  } catch  {
     levels.value = []
   } finally {
     loading.value = false
     await nextTick()
-    renderChart()
+    prepareDataAndRender()
   }
 }
 
-/* helper: reload both devices + data */
-async function reloadAll() {
-  await loadDevices()
-  await loadHistoryForDevice()
+async function reloadAll() { await loadDevices(); await loadHistoryForDevice() }
+function onDeviceChange() { loadHistoryForDevice() }
+
+/* --- 1. HÀM KÉO DÀI 2 ĐẦU (GIỮ BIỂU ĐỒ FULL 24H) --- */
+function addBoundaryPoints(data) {
+  if (!data || data.length === 0) return data;
+  const startDate = parseDateSafeYMD(filterFrom.value);
+  const endDate = parseDateSafeYMDEnd(filterTo.value);
+  if (!startDate || !endDate) return data;
+
+  const startTime = startDate.getTime();
+  const endTime = endDate.getTime();
+  const newData = [...data];
+
+  // Nếu điểm đầu tiên lớn hơn 00:00 -> Chèn thêm điểm 00:00
+  if (newData[0].x > startTime) {
+    newData.unshift({ x: startTime, y: newData[0].y });
+  }
+  // Nếu điểm cuối cùng nhỏ hơn 23:59 -> Chèn thêm điểm 23:59
+  if (newData[newData.length - 1].x < endTime) {
+    newData.push({ x: endTime, y: newData[newData.length - 1].y });
+  }
+  return newData;
 }
 
-/* when device changes */
-function onDeviceChange() {
-  // reload data for selected device
-  loadHistoryForDevice()
-}
-
-/* ---------- AGGREGATION: group by hour on client ---------- */
-/**
- * group an array of records { timestamp, level } into hours,
- * return array sorted ascending: [{ hourISO, avg, min, max, count }]
- */
-function aggregateHourly(records) {
+/* --- 2. HÀM GỘP 3 PHÚT (CORE LOGIC) --- */
+function groupData(records, minutesFrame) {
   const m = new Map()
-  for (const r of records) {
+  const sorted = records.slice().sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+
+  for (const r of sorted) {
     if (!r || r.timestamp == null) continue
     const d = new Date(r.timestamp)
     if (isNaN(d.getTime())) continue
-    const key = d.getFullYear() + '-' +
-                String(d.getMonth() + 1).padStart(2, '0') + '-' +
-                String(d.getDate()).padStart(2, '0') + 'T' +
-                String(d.getHours()).padStart(2, '0')
-    if (!m.has(key)) m.set(key, [])
+
+    // Logic làm tròn về bội số của 3 phút (0, 3, 6, 9...)
+    const msPerFrame = minutesFrame * 60 * 1000
+    const roundedTime = Math.floor(d.getTime() / msPerFrame) * msPerFrame
+
+    if (!m.has(roundedTime)) m.set(roundedTime, [])
     const lv = Number(r.level)
-    if (!Number.isFinite(lv)) continue
-    m.get(key).push(lv)
+    if (Number.isFinite(lv)) m.get(roundedTime).push(lv)
   }
 
   const out = []
-  for (const [k, arr] of m.entries()) {
-    const sum = arr.reduce((s, x) => s + x, 0)
-    const avg = sum / arr.length
-    const min = Math.min(...arr)
-    const max = Math.max(...arr)
-    const hourISO = k + ':00:00'
-    out.push({ hourISO, avg, min, max, count: arr.length })
+  for (const [timestamp, arr] of m.entries()) {
+    // Tính trung bình cộng của các điểm trong 3 phút đó
+    const avg = arr.reduce((s, x) => s + x, 0) / arr.length
+    out.push({ x: timestamp, y: Number(avg.toFixed(1)) })
   }
-
-  out.sort((a, b) => new Date(a.hourISO) - new Date(b.hourISO))
-  return out
+  return out.sort((a,b) => a.x - b.x)
 }
 
-/* ---------- RENDER CHART ---------- */
-function renderChart() {
-  if (chartInstance) {
-    try { chartInstance.destroy() } catch { /*ignore*/ }
-    chartInstance = null
-  }
-
-  const source = (Array.isArray(filteredRows.value) ? filteredRows.value : []).slice().sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
+function prepareDataAndRender() {
+  const source = (Array.isArray(filteredRows.value) ? filteredRows.value : [])
+      .filter(r => Number(r.level) > 0) // Lọc số 0
 
   if (!source || source.length === 0) {
     noChartData.value = true
+    if (chartInstance) { try { chartInstance.destroy() } catch {
+      // ignore
+    } chartInstance = null }
     return
   } else {
     noChartData.value = false
   }
 
-  const hourly = aggregateHourly(source)
+  // GỘP LUÔN 3 PHÚT (Không cần Raw nữa)
+  let grouped = groupData(source, 3);
 
-  if (!hourly || hourly.length === 0) {
-    noChartData.value = true
-    return
-  }
+  // Kéo dài dữ liệu ra 2 đầu 00:00 - 23:59
+  cachedData = addBoundaryPoints(grouped);
 
-  const labels = hourly.map(h => {
-    const d = new Date(h.hourISO)
-    return d.toLocaleDateString() + ' ' + String(d.getHours()).padStart(2, '0') + ':00'
-  })
+  // Vẽ
+  renderChart(cachedData);
+}
 
-  const dataAvg = hourly.map(h => Number(h.avg.toFixed(2)))
-  const dataMin = hourly.map(h => Number(h.min))
-  const dataMax = hourly.map(h => Number(h.max))
+/* --- RENDER CHART (ĐÃ TỐI ƯU ZOOM) --- */
+function renderChart(dataToRender) {
+  if (chartInstance) { try { chartInstance.destroy() } catch {
+    // ignore
+  } chartInstance = null }
 
   const ctxEl = historyCanvas.value
   if (!ctxEl) return
   const ctx = ctxEl.getContext('2d')
 
+  // Cố định trục X theo ngày đã chọn (0h -> 23h59)
+  const minX = parseDateSafeYMD(filterFrom.value).getTime();
+  const maxX = parseDateSafeYMDEnd(filterTo.value).getTime();
+
   chartInstance = new Chart(ctx, {
     type: 'line',
     data: {
-      labels,
       datasets: [
-        { label: 'max', data: dataMax, borderWidth: 0, pointRadius: 0, tension: 0.3, fill: false },
-        { label: 'min', data: dataMin, borderWidth: 0, pointRadius: 0, tension: 0.3, fill: '-1', backgroundColor: 'rgba(54,162,235,0.12)' },
-        { label: 'Mực nước (avg) cm', data: dataAvg, fill: false, tension: 0.3, borderWidth: 2, pointRadius: 3, borderColor: 'rgba(54,162,235,0.9)', backgroundColor: 'rgba(54,162,235,0.2)' }
+        {
+          label: 'Mực nước (cm)',
+          data: dataToRender,
+          fill: true,
+          tension: 0.3, // Độ cong vừa phải
+          borderWidth: 2,
+          pointRadius: 2, // Điểm nhỏ gọn (vì gộp 3p vẫn khá nhiều điểm)
+          pointHoverRadius: 5,
+          borderColor: 'rgba(54,162,235,1)',
+          backgroundColor: 'rgba(54,162,235,0.2)'
+        }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: { x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 12 } }, y: { beginAtZero: true } },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              const idx = context.dataIndex
-              const dsLabel = context.dataset.label || ''
-              if (dsLabel.includes('avg')) return `avg: ${dataAvg[idx]} cm`
-              if (dsLabel === 'min') return `min: ${dataMin[idx]} cm`
-              if (dsLabel === 'max') return `max: ${dataMax[idx]} cm`
-              return `${dsLabel}: ${context.formattedValue}`
+      interaction: { mode: 'nearest', intersect: false, axis: 'x' },
+      scales: {
+        x: {
+          type: 'linear', // Trục tuyến tính giúp zoom mượt
+          position: 'bottom',
+          min: minX,
+          max: maxX,
+          ticks: {
+            maxRotation: 0, autoSkip: true, maxTicksLimit: 10,
+            callback: function(value) {
+              const d = new Date(value);
+              return d.toLocaleTimeString('vi-VN', { hour12: false, hour:'2-digit', minute:'2-digit' })
             }
           }
+        },
+        y: { beginAtZero: true }
+      },
+      plugins: {
+        legend: { display: true },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              const v = items[0].parsed.x;
+              return new Date(v).toLocaleString('vi-VN');
+            }
+          }
+        },
+        // CẤU HÌNH ZOOM ĐƠN GIẢN (Zoom trực tiếp vào data 3 phút)
+        zoom: {
+          zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: 'x',
+          },
+          pan: { enabled: true, mode: 'x' },
+          limits: { x: { min: 'original', max: 'original' } }
         }
       }
     }
@@ -431,31 +386,26 @@ function renderChart() {
 }
 
 /* UI actions */
-function applyDateFilter() {
-  loadHistoryForDevice()
-}
-function clearDateFilter() {
-  filterFrom.value = ''
-  filterTo.value = ''
-  loadHistoryForDevice()
-}
+function applyDateFilter() { loadHistoryForDevice() }
+function clearDateFilter() { filterFrom.value = ''; filterTo.value = ''; loadHistoryForDevice() }
 const gotoId = ref('')
 function gotoRecord() {
   const id = Number(gotoId.value)
   if (!id) return
   const found = levels.value.find((r) => r.id === id)
-  if (!found) {
-    Notify.create({ type: 'warning', message: 'Không tìm thấy bản ghi id=' + id })
-    return
-  }
+  if (!found) return
   Notify.create({ type: 'positive', message: `Found id=${id} level=${formatLevel(found.level)} cm` })
 }
 
-/* lifecycle */
-onMounted(() => {
-  // load devices + initial data
-  loadDevices()
-  loadHistoryForDevice()
+onMounted(async () => {
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  filterTo.value = today.toISOString().split('T')[0];
+  filterFrom.value = yesterday.toISOString().split('T')[0];
+
+  await loadDevices()
+  await loadHistoryForDevice()
 })
 </script>
 
