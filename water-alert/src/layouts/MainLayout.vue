@@ -15,7 +15,7 @@
         <q-toolbar-title class="row items-center">
           <img src="/Logo.png" style="height: 32px; margin-right: 10px;" />
 
-          <span class="text-weight-bold logo-text">Water Alert</span>
+          <span class="text-weight-bold logo-text">WaterALERT</span>
         </q-toolbar-title>
 
           <div class="row items-center q-gutter-sm">
@@ -286,7 +286,6 @@ function onLogout() {
 }
 
 .menu-home {
-  text-transform: uppercase; /* IN HOA */
   font-size: 17px;           /* To hơn */
   font-weight: 700;          /* Đậm */
   color: #449af0;            /* Xanh đậm */
