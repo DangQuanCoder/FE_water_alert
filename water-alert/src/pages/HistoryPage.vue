@@ -309,8 +309,16 @@ function prepareDataAndRender() {
   renderChart(cachedData);
 }
 
+function computeYMaxWithPadding(data, padding = 10) {
+  if (!data || data.length === 0) return padding
+  const maxY = Math.max(...data.map(d => Number(d.y)).filter(Number.isFinite))
+  return Math.ceil(maxY + padding)
+}
+
 /* --- RENDER CHART (ĐÃ TỐI ƯU ZOOM) --- */
 function renderChart(dataToRender) {
+  const yMaxWithPadding = computeYMaxWithPadding(dataToRender, 10)
+
   if (chartInstance) { try { chartInstance.destroy() } catch {
     // ignore
   } chartInstance = null }
@@ -323,6 +331,21 @@ function renderChart(dataToRender) {
   const minX = parseDateSafeYMD(filterFrom.value).getTime();
   const maxX = parseDateSafeYMDEnd(filterTo.value).getTime();
 
+  const dangerThresholdDataset = {
+  label: `Ngưỡng nguy hiểm (${TH_DANGER} cm)`,
+  type: 'line',
+  data: [
+    { x: minX, y: TH_DANGER },
+    { x: maxX, y: TH_DANGER }
+  ],
+  borderColor: 'rgba(220,53,69,0.9)', // đỏ
+  borderWidth: 2,
+  borderDash: [6, 6],                 // nét đứt
+  pointRadius: 0,
+  fill: false
+}
+
+
   chartInstance = new Chart(ctx, {
     type: 'line',
     data: {
@@ -331,13 +354,14 @@ function renderChart(dataToRender) {
           label: 'Mực nước (cm)',
           data: dataToRender,
           fill: true,
-          tension: 0.3, // Độ cong vừa phải
+          tension: 0.4,
           borderWidth: 2,
-          pointRadius: 2, // Điểm nhỏ gọn (vì gộp 3p vẫn khá nhiều điểm)
+          pointRadius: 0,        // ❗ QUAN TRỌNG
           pointHoverRadius: 5,
           borderColor: 'rgba(54,162,235,1)',
           backgroundColor: 'rgba(54,162,235,0.2)'
-        }
+        },
+        dangerThresholdDataset
       ]
     },
     options: {
@@ -358,7 +382,11 @@ function renderChart(dataToRender) {
             }
           }
         },
-        y: { beginAtZero: true }
+        y: {
+          beginAtZero: true,
+          max: yMaxWithPadding
+        }
+
       },
       plugins: {
         legend: { display: true },
@@ -376,14 +404,50 @@ function renderChart(dataToRender) {
             wheel: { enabled: true },
             pinch: { enabled: true },
             mode: 'x',
+            onZoomComplete({ chart }) {
+              const range = chart.scales.x.max - chart.scales.x.min
+
+              const SHOW_POINTS_RANGE = 30 * 60 * 1000 // 30 phút
+
+              chart.data.datasets[0].pointRadius =
+                range < SHOW_POINTS_RANGE ? 3 : 0
+
+              chart.update('none')
+            }
+
           },
-          pan: { enabled: true, mode: 'x' },
-          limits: { x: { min: 'original', max: 'original' } }
+          pan: {
+            enabled: true,
+            mode: 'x',
+            onPanComplete({ chart }) {
+              updateYScaleAfterZoom(chart)
+            }
+          },
+          limits: {
+            x: { min: 'original', max: 'original' }
+          }
         }
       }
     }
   })
 }
+
+function updateYScaleAfterZoom(chart) {
+  const xScale = chart.scales.x
+  const yScale = chart.scales.y
+
+  const visibleData = chart.data.datasets[0].data.filter(p =>
+    p.x >= xScale.min && p.x <= xScale.max
+  )
+
+  if (!visibleData.length) return
+
+  const maxY = Math.max(...visibleData.map(p => p.y))
+  yScale.options.max = Math.ceil(maxY + 10)
+
+  chart.update('none') // update nhẹ, không animate
+}
+
 
 /* UI actions */
 function applyDateFilter() { loadHistoryForDevice() }
