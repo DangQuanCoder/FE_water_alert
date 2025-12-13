@@ -106,16 +106,16 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function requestPasswordReset(payload) {
     try {
-      const res = await api.post('/api/auth/request-password-reset', payload)
+      const res = await api.post('/api/auth/forgot-password', payload)
       return res.data ?? { success: true }
     } catch (e) {
       return {
         success: false,
-        message: e?.response?.data?.message || 'Gửi yêu cầu đặt lại mật khẩu thất bại'
+        message: e?.response?.data?.message || 'Gửi yêu cầu thất bại'
       }
     }
   }
-  
+
   async function resetPasswordByToken(tokenStr, newPassword) {
     try {
       const res = await api.post('/api/auth/reset-password', { token: tokenStr, newPassword })
@@ -130,12 +130,16 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function resetPasswordByOtp(phoneNumber, otp, newPassword) {
     try {
-      const res = await api.post('/api/auth/reset-password-otp', { phone: phoneNumber, otp, newPassword })
+      const res = await api.post('/api/auth/forgot-password/verify', {
+        phone: phoneNumber,
+        otp: otp,
+        newPassword: newPassword
+      })
       return res.data ?? { success: true }
     } catch (e) {
       return {
         success: false,
-        message: e?.response?.data?.message || 'Đặt lại mật khẩu thất bại (OTP)'
+        message: e?.response?.data?.message || 'OTP sai hoặc hết hạn'
       }
     }
   }

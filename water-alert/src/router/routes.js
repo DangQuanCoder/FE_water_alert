@@ -34,6 +34,9 @@ const routes = [
         component: () => import('pages/SubscriptionsPage.vue'),
         meta: { role: ['user', 'admin'] }
       },
+
+      { path: 'forgot-password', component: () => import('pages/ForgotPasswordPage.vue') },
+      { path: 'reset-password', component: () => import('pages/ResetPasswordPage.vue') },
     ]
   },
 

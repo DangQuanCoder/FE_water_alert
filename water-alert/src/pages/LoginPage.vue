@@ -1,19 +1,35 @@
 <template>
-  <q-page class="q-pa-md">
-    <q-card class="max-w-md mx-auto">
+  <q-page class="q-pa-md flex flex-center">
+    <q-card style="width: 100%; max-width: 400px">
       <q-card-section>
-        <div class="text-h6">Đăng nhập</div>
+        <div class="text-h6 text-center">Đăng nhập</div>
       </q-card-section>
 
       <q-card-section>
         <q-form @submit.prevent="onLogin" class="q-gutter-md">
-          <q-input v-model="phone" label="Số điện thoại" required />
-          <q-input v-model="password" type="password" label="Mật khẩu" required />
+          <q-input
+            v-model="phone"
+            label="Số điện thoại"
+            :rules="[val => !!val || 'Vui lòng nhập số điện thoại']"
+            lazy-rules
+          />
 
-          <div class="row items-center q-gutter-sm q-mt-md">
-            <q-btn type="submit" label="ĐĂNG NHẬP" color="primary" />
-            <q-btn flat label="ĐĂNG KÝ" to="/register" />
-            <q-btn flat label="Quên mật khẩu?" @click="goForgot" />
+          <q-input
+            v-model="password"
+            type="password"
+            label="Mật khẩu"
+            :rules="[val => !!val || 'Vui lòng nhập mật khẩu']"
+            lazy-rules
+          />
+
+          <div class="column q-gutter-sm q-mt-md">
+            <q-btn type="submit" label="ĐĂNG NHẬP" color="primary" :loading="loading" />
+
+            <div class="row justify-between items-center">
+              <q-btn flat no-caps label="Đăng ký tài khoản" color="primary" to="/register" />
+
+              <q-btn flat no-caps label="Quên mật khẩu?" color="grey-8" to="/forgot-password" />
+            </div>
           </div>
         </q-form>
       </q-card-section>
@@ -24,36 +40,35 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from 'stores/auth'
 import { Notify } from 'quasar'
+import { useAuthStore } from 'src/stores/auth'
 
 const router = useRouter()
-const store = useAuthStore()
+const authStore = useAuthStore()
 
 const phone = ref('')
 const password = ref('')
+const loading = ref(false)
 
-async function onLogin () {
+async function onLogin() {
+  loading.value = true
   try {
-    console.log('Đăng nhập với:', phone.value, password.value)
-    const res = await store.login(phone.value, password.value)
-    console.log('login response:', res)
+    const res = await authStore.login(phone.value, password.value)
 
     if (res.success) {
-      Notify.create({ type: 'positive', message: 'Đăng nhập thành công!' })
-      if (res.role === 'admin') router.push('/admin')
-      else router.push('/user')
+      Notify.create({ type: 'positive', message: 'Đăng nhập thành công' })
+      router.push('/') // Chuyển về trang chủ sau khi đăng nhập
     } else {
-      Notify.create({ type: 'negative', message: res.message || 'Đăng nhập thất bại' })
+      Notify.create({ type: 'negative', message: res.message || 'Sai thông tin đăng nhập' })
     }
-  } catch (err) {
-    console.error('Lỗi đăng nhập:', err)
-    Notify.create({ type: 'negative', message: 'Lỗi hệ thống. Kiểm tra Console.' })
+  } catch {
+    Notify.create({ type: 'negative', message: 'Lỗi kết nối' })
+  } finally {
+    loading.value = false
   }
 }
-
-function goForgot() {
-  router.push('/forgot-password')
-}
-
 </script>
+
+<style scoped>
+/* Không cần CSS tailwind nữa vì đã dùng class của Quasar */
+</style>

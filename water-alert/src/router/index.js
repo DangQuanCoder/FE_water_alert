@@ -26,10 +26,20 @@ export default defineRouter(function () {
     try {
       const auth = useAuthStore()
 
-      const publicPages = ['/', '/login', '/register', '/verify-otp']
+      // --- SỬA DÒNG NÀY ---
+      // Thêm '/forgot-password' và '/reset-password' vào danh sách
+      const publicPages = [
+        '/',
+        '/login',
+        '/register',
+        '/verify-otp',
+        '/forgot-password',
+        '/reset-password'
+      ]
 
       if (publicPages.includes(to.path)) return next()
 
+      // ... (phần dưới giữ nguyên)
       if (!auth?.token) {
         return next({ path: '/login', query: { redirect: to.fullPath } })
       }
