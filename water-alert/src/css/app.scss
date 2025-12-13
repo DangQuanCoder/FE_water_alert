@@ -7,3 +7,38 @@ body {
   font-family: 'Inter', sans-serif;
   --q-font-family: 'Inter', sans-serif;
 }
+.page-slide-enter-from {
+  opacity: 0;
+  transform: translateY(40px);
+}
+
+.page-slide-enter-active {
+  transition: all 0.45s ease-out;
+}
+
+.page-slide-enter-to {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.page-slide-leave-from {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.page-slide-leave-active {
+  transition: all 0.2s ease-in;
+}
+
+.page-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+html {
+  scrollbar-gutter: stable;
+  overflow-y: scroll;
+}
+::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+}
