@@ -1,1 +1,9 @@
 // app global css in SCSS form
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+body {
+  font-family: 'Inter', sans-serif;
+}
+body {
+  font-family: 'Inter', sans-serif;
+  --q-font-family: 'Inter', sans-serif;
+}

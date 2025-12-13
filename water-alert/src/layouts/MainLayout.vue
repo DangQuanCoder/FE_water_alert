@@ -1,13 +1,24 @@
 <template>
   <q-layout view="lHh Lpr lFf">
-    <q-header elevated>
+    <q-header elevated class="header-gradient">
       <q-toolbar>
 
-        <q-btn flat dense round icon="menu" @click="leftDrawerOpen = !leftDrawerOpen" />
+        <q-btn
+          flat
+          dense
+          round
+          icon="menu"
+          class="text-primary"
+          @click="leftDrawerOpen = !leftDrawerOpen"
+        />
 
-        <q-toolbar-title>Water Alert</q-toolbar-title>
+        <q-toolbar-title class="row items-center">
+          <img src="/Logo.png" style="height: 32px; margin-right: 10px;" />
 
-        <div class="row items-center q-gutter-sm">
+          <span class="text-weight-bold logo-text">Water Alert</span>
+        </q-toolbar-title>
+
+          <div class="row items-center q-gutter-sm">
 
           <q-btn v-if="isLoggedIn" flat round dense icon="notifications">
             <q-badge
@@ -72,7 +83,7 @@
 
           <div v-if="isLoggedIn" class="text-subtitle2 q-mr-sm">
             {{ auth.phone }}
-            <span class="text-caption text-grey-6">({{ auth.role }})</span>
+            <span class="text-caption text-white">({{ auth.role }})</span>
           </div>
 
           <q-btn
@@ -90,12 +101,20 @@
       </q-toolbar>
     </q-header>
 
-    <q-drawer v-model="leftDrawerOpen" show-if-above bordered>
+    <q-drawer v-model="leftDrawerOpen"
+              show-if-above
+              bordered>
       <q-list padding>
         <q-item clickable v-ripple to="/">
-          <q-item-section avatar><q-icon name="home" /></q-item-section>
-          <q-item-section>Trang chủ</q-item-section>
+          <q-item-section avatar>
+            <q-icon name="home" />
+          </q-item-section>
+
+          <q-item-section>
+            <span class="menu-home">Trang chủ</span>
+          </q-item-section>
         </q-item>
+
         <q-item clickable v-ripple to="/user" v-if="isLoggedIn">
           <q-item-section avatar><q-icon name="person" /></q-item-section>
           <q-item-section>User</q-item-section>
@@ -209,15 +228,70 @@ function onLogout() {
 }
 </script>
 
-<style scoped>
-.scroll {
-  overflow-y: auto;
+<style>
+/* 1. Nhúng Font Patua One từ Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+
+/* 2. Hiệu ứng Gradient nền Header (Giữ nguyên) */
+.header-gradient {
+  background: linear-gradient(to right, #ffffff 0%, #449af0 100%);
 }
 
-.animate-ping {
-  animation: ping 1.3s infinite;
+/* 3. Class cho chữ Water Alert */
+.logo-text {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  letter-spacing: 0.5px;
+
+  /* Căn chỉnh vị trí */
+  position: relative;
+  top: 4px;
+  line-height: 1;
+
+  /* --- CẬP NHẬT MÀU MỚI --- */
+  color: #5e97cf;
+
+  /* Hiệu ứng bóng đổ (Giữ nguyên) */
+  filter: drop-shadow(0px 2px 2px rgb(255, 255, 255));
 }
 
+.q-layout {
+  /* 1. Đường dẫn đến ảnh nền. / trỏ đến thư mục public/ */
+  background-image: url('/Background.jpg');
+
+  /* 2. Đảm bảo ảnh bao phủ toàn bộ khung nhìn */
+  background-size: cover;
+
+  /* 3. Cố định ảnh nền khi người dùng cuộn trang */
+  background-attachment: fixed;
+
+  /* 4. (Tùy chọn) Chỉnh độ mờ để các thẻ nội dung nổi bật hơn */
+  /* opacity: 0.85; */
+}
+
+.q-drawer .q-drawer__content {
+  /* Ép màu Gradient từ dưới lên */
+  background: linear-gradient(to top, #a1e3fd 0%, #ffffff 100%) !important;
+}
+
+/* Đảm bảo các mục Q-item bên trong không có màu nền ghi đè */
+.q-drawer .q-item {
+    background-color: transparent !important;
+}
+
+.menu-home {
+  text-transform: uppercase; /* IN HOA */
+  font-size: 17px;           /* To hơn */
+  font-weight: 700;          /* Đậm */
+  color: #449af0;            /* Xanh đậm */
+  letter-spacing: 0.8px;
+}
+
+
+/* Các class phụ trợ giữ nguyên */
+.scroll { overflow-y: auto; }
+.animate-ping { animation: ping 1.3s infinite; }
 @keyframes ping {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.3); opacity: 0.7; }
